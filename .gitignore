@@ -1,0 +1,32 @@
+# Secrets — never commit these
+.env
+.env.*
+!.env.example
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Autonomous action / runtime output — local state, not source
+blocklist.json
+data/security_logs.csv
+data/*.json
+!data/.gitkeep
+reports/*.md
+!reports/.gitkeep
+
+# Neo4j local data (Phase 3)
+neo4j_data/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,7 +1,9 @@
 # Aegis — AI Cyber Defense Multi-Agent System
 
 > Working documentation compiled from reference material (tutorial screenshots) reviewed on 2026-09-04/05.
-> Status: **research/reference phase — no code written yet.** This document exists to lock in everything learned before scaffolding begins.
+> Status: **repo scaffolded, Phase 1 not yet started.** This document records *why* every decision was made; see [PLANNING.md](./PLANNING.md) for the concrete, step-by-step build plan (*what to do, in what order*).
+
+**Repo:** [github.com/dineshyadav03/aegis](https://github.com/dineshyadav03/aegis) (public) · **Project board:** [github.com/users/dineshyadav03/projects/1](https://github.com/users/dineshyadav03/projects/1) (linked to the repo)
 
 ---
 
@@ -270,6 +272,9 @@ A careful pass through every screenshot — not just the ones summarized above �
 | **Reflection stage** | **Yes — add a Reflect agent** between Classify and Respond | Closes gap #1 against the original concept (§7a): findings now get reviewed/critiqued before anything acts on them, with a capped loop back to Classify for re-analysis if something looks unjustified. |
 | **Autonomous response** | **Yes — but narrowly bounded**, not the original concept's fully autonomous orchestration | Closes gap #2 against the original concept (§7a): the *only* autonomous action is auto-blocking a confirmed-malicious IP (High severity + high confidence). Every other action (password resets, system isolation, access reviews) stays a human-executed recommendation. |
 | Auto-block mechanism | **Write to a local blocklist file** (`blocklist.json`), not a real firewall API call | No real corporate firewall exists to integrate with in this project; a local file demonstrates the capability honestly. A real deployment would swap this for an actual firewall/WAF API. |
+| Repo license | **Apache 2.0** | Matches the license already used elsewhere across this developer's repos; includes an explicit patent grant. |
+| Package/dependency manager | **pip + venv** | Simplest, most universally familiar; matches the reference tutorial's own setup style. |
+| Anthropic API key | **Not yet obtained — first blocking task for Phase 1** | Nothing in Phase 1 can actually run against a real model until this exists; see [PLANNING.md](./PLANNING.md) §0. |
 
 **Net effect:** Aegis is intentionally scoped *beyond* both the reference tutorial (which had 4 linear agents, no RAG, no reflection, no autonomous action) and — in the RAG and reflection dimensions — matches or exceeds the *original* concept slide too. Suggested build order:
 
@@ -339,7 +344,7 @@ Taken together, this makes Aegis a stronger portfolio piece than any one of thos
 | **Autonomy model** | Decision-support by default; one narrowly bounded exception (auto-block a confirmed-malicious IP to a local blocklist file) — everything else always waits for a human. |
 | **Scope vs. reference tutorial** | Deliberately much larger: real AbuseIPDB threat-intel, real persistent cross-run memory, CSV+JSON ingestion, PII anonymization, configurable detection thresholds, Slack alerting, a full GraphRAG/Neo4j layer, a reflection loop, one bounded autonomous action, and Claude instead of OpenAI. |
 | **Scope vs. original concept slide** | Now matches on all four architectural boxes (§7a) — the two gaps found on 2026-09-05 (missing reflection, missing response orchestration) are both resolved. |
-| **Status** | Reference design fully understood; all scope decisions made (§6); both concept gaps closed (§7a). **No code exists in this project yet.** Next step: scaffold Phase 1 (core 6-stage pipeline). |
+| **Status** | Reference design fully understood; all scope decisions made (§6); both concept gaps closed (§7a); repo scaffolded (LICENSE, `.gitignore`, `requirements.txt`, `.env.example`) and linked to a GitHub Project board. **No pipeline code exists yet** — blocked only on obtaining an Anthropic API key (see [PLANNING.md](./PLANNING.md) §0). Next step: Phase 1 implementation. |
 
 ---
 

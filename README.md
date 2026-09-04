@@ -6,7 +6,7 @@ Aegis is a decision-support system: it detects and triages security incidents fr
 
 ## Status
 
-Design and planning phase — see [PROJECT_DOCUMENTATION.md](./PROJECT_DOCUMENTATION.md) for the full architecture, all scope decisions, and the phased build plan. No implementation code yet.
+Design and planning phase, repo scaffolded. See [PROJECT_DOCUMENTATION.md](./PROJECT_DOCUMENTATION.md) for the full architecture and every scope decision, and [PLANNING.md](./PLANNING.md) for the concrete, step-by-step build plan and prerequisites checklist. No pipeline code yet — Phase 1 is blocked only on obtaining an Anthropic API key.
 
 ## Planned stack
 
