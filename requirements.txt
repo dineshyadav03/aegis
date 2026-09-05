@@ -14,3 +14,6 @@ voyageai>=0.2           # embeddings for hybrid retrieval
 
 # Phase 4 — persistent memory
 langgraph-checkpoint-sqlite>=2.0   # persistent LangGraph checkpointer (investigation_history itself uses stdlib sqlite3, no extra dependency)
+
+# Dev / testing
+pytest>=8.0

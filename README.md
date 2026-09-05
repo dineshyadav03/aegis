@@ -6,6 +6,14 @@ Aegis is a **decision-support system**: it detects and triages security incident
 
 **Status: all four build phases complete and verified against live services** — real Gemini, real AbuseIPDB, real Slack, real Neo4j Aura + Voyage AI over real NVD/MITRE data, real persistent memory. Not a scaffold. See [PROJECT_DOCUMENTATION.md](./PROJECT_DOCUMENTATION.md) for the full build history, every decision made, and every real bug found and fixed along the way.
 
+![Aegis UI: a completed analysis showing stat cards for events processed and severity counts, and finding cards citing real CVE IDs and MITRE ATT&CK techniques](./docs/ui_screenshot.png)
+
+## Why I built this
+
+I wanted a portfolio project that was genuinely agentic — not a single prompt-to-response wrapper, but a multi-agent pipeline that makes real decisions with real consequences: escalating severity based on live threat data, catching its own bad judgment calls, and taking one narrow autonomous action. Every integration in Aegis (Gemini, AbuseIPDB, Slack, Neo4j, Voyage AI) is wired to the live service, not mocked, because the interesting bugs — and the interesting engineering — only show up once real APIs, real rate limits, and real data are in the loop. `PROJECT_DOCUMENTATION.md` keeps a running log of exactly what broke and why, on the theory that the debugging story is more informative than a clean diff.
+
+Two moments stood out while building it. First, Aegis's own Reflect agent caught a real bug in Classify — a blanket "every sudo command is High severity" rule — by correctly arguing that routine maintenance shouldn't be flagged the same as a suspicious privilege escalation, which is exactly the alert-fatigue problem the project exists to reduce. Second, verifying the CVE→CWE→ATT&CK bridge required abandoning my original assumption (a direct CWE-to-ATT&CK mapping) once research showed MITRE's real bridge runs through CAPEC — a reminder to verify domain assumptions against primary sources before building on them.
+
 ## What it does
 
 Give it a CSV or JSON security log file. It will:
@@ -77,6 +85,14 @@ Every "✅ live" above means confirmed against the real external service during 
 - **[PROJECT_DOCUMENTATION.md](./PROJECT_DOCUMENTATION.md)** — the full story: architecture, every scope decision and why, and a Build Notes section per phase documenting what was actually discovered while building it (API quirks, real infrastructure gotchas, bugs caught by live testing).
 - **[PLANNING.md](./PLANNING.md)** — the phase-by-phase task breakdown and Definition of Done checklists.
 - [Project board](https://github.com/users/dineshyadav03/projects/1) — all four phases tracked, all marked Done.
+
+## Testing
+
+```bash
+pytest
+```
+
+55 tests covering log parsing/validation, pattern and anomaly detection (including threshold boundary conditions), the risk-assessment severity ladder (deterministic rules plus GraphRAG and recurrence escalation — including the escalate-only-never-downgrade guarantee), PII anonymization/reverse-lookup, cross-run history persistence, and the auto-block gate in Respond. LLM-dependent paths (Gemini calls, the LLM-driven GraphRAG lookup decision) are exercised via Fast Mode's deterministic fallback rather than mocked network calls, consistent with this project's live-integration-first approach.
 
 ## Configuration
 
