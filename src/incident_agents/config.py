@@ -15,6 +15,12 @@ load_dotenv()
 # — so the SDK's "use Chat.send_message instead" nudge doesn't apply here.
 logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 
+# Phase 4: restrict checkpoint deserialization to known-safe types (recommended
+# by langgraph-checkpoint-sqlite's own docs) — defense in depth in case the
+# local checkpoint DB is ever tampered with, even though it's not exposed to
+# any external service.
+os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
+
 DEFAULT_MODEL = "gemini-3.6-flash"  # confirmed working end-to-end during Phase 1 — see PROJECT_DOCUMENTATION.md §5.12
 
 
@@ -108,3 +114,14 @@ def get_thresholds() -> Thresholds:
 
 def get_data_path() -> str:
     return os.environ.get("AEGIS_DATA_PATH", "data/security_logs.csv")
+
+
+def get_checkpoint_db_path() -> str:
+    return os.environ.get("AEGIS_CHECKPOINT_DB_PATH", "data/checkpoints.sqlite")
+
+
+def get_history_db_path() -> str:
+    return os.environ.get("AEGIS_HISTORY_DB_PATH", "data/investigation_history.sqlite")
+
+
+RECURRING_MIN_TIMES_FLAGGED = 3

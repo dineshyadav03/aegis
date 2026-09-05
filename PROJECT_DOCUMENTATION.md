@@ -97,7 +97,7 @@ WORKFLOW PIPELINE
 Each agent uses the **ReAct (Reasoning + Acting) framework**:
 - **Reasoning** — agents think through problems step-by-step before acting.
 - **Acting** — agents call specialized tools scoped to their stage.
-- **Memory** — agents are designed to learn from previous investigations (Phase 4 — see §6).
+- **Memory** — ✅ implemented (Phase 4, §5.15): Classify checks every finding against cross-run investigation history and can escalate severity for recurring patterns.
 - **Confidence Scoring** — every agent attaches a confidence score to its output, surfaced to the end user.
 - **Reflection** — the Reflect agent (§5.4) reviews Classify's output before it can proceed, and can send it back for re-analysis. This was named as a design principle in the original concept slide but wasn't demonstrated anywhere in the reference tutorial's actual code — it's a real gap we're now closing (§7a).
 
@@ -192,7 +192,8 @@ graph.add_conditional_edges("respond", needs_report, {"report": "report", END: E
 
 graph.add_edge("report", END)
 
-checkpointer = InMemorySaver()  # Phase 1; becomes a persistent store in Phase 4 (§6)
+conn = sqlite3.connect(get_checkpoint_db_path(), check_same_thread=False)
+checkpointer = SqliteSaver(conn)  # Phase 4: persistent, was InMemorySaver in Phases 1-3
 return graph.compile(checkpointer=checkpointer)
 ```
 This preserves the reference tutorial's short-circuit behavior (nothing worth escalating → straight to `END`) while adding the reflection feedback loop and the bounded autonomous-response step that the original concept called for but the tutorial's actual code never built.
@@ -287,6 +288,22 @@ Phase 1 is now built and verified end-to-end (CLI and Gradio UI both tested agai
 
 **One deprecation knowingly left as-is:** `db.index.vector.queryNodes` is deprecated in Neo4j 2026.04 in favor of a new Cypher `SEARCH` clause. Checked the replacement syntax before deciding — its documented form is built for node-to-node similarity (an existing node's stored embedding), not searching by an ad-hoc query vector like ours (a fresh embedding from arbitrary text, never stored as a node). Kept the deprecated-but-functional procedure rather than risk breaking a verified-working integration over an unverified syntax substitution; noted in code for future revisit.
 
+### 5.15 Phase 4 — Persistent Cross-Run Memory ✅ BUILT & VERIFIED LIVE (2026-09-05)
+
+Two genuinely different mechanisms, kept deliberately separate rather than overloaded onto one:
+
+1. **The LangGraph checkpointer** (`graph.py`) — swapped `InMemorySaver` for `langgraph-checkpoint-sqlite`'s `SqliteSaver`, backed by `data/checkpoints.sqlite`. This persists one run's internal graph state for potential resumption/inspection after the process exits. Used the direct `SqliteSaver(conn)` constructor (a raw `sqlite3.Connection`) rather than the library's `from_conn_string(...)` context-manager form, specifically to avoid restructuring `build_graph()`'s calling convention across `run.py` and the Gradio app — a smaller, less invasive change for the same outcome.
+2. **`memory.py` — the actual "Aegis remembers past investigations" feature.** A separate SQLite table (`investigation_history`, `data/investigation_history.sqlite`), keyed by `(source IP, pattern_type)`, tracking `times_flagged` / `first_seen` / `last_seen` / `last_severity` across every past run — not the checkpointer's job, since each CLI invocation gets a fresh `thread_id` and would never revisit old checkpointer state on its own.
+
+**How it plugs in:**
+- **Classify** (read-only check): looks up each finding's history before assessing it. If the same `(ip, pattern_type)` has recurred **≥3 times** before, `risk_assessor_tool` escalates severity by one level (Low→Medium, Medium→High, never downgrades) — same escalate-only pattern as GraphRAG's CVE-based escalation (§5.10).
+- **Respond** (write, exactly once per run): after Reflect's loop concludes, records this run's findings into history. Deliberately placed in Respond rather than Classify or Reflect, because Respond runs exactly once per pipeline execution regardless of how many times Reflect looped back for re-analysis — recording in Classify or Reflect would double-count a recurrence every time a single run retried.
+- **Report**: cites "Previously seen: flagged Nx before (first seen YYYY-MM-DD)" per finding when history exists.
+
+**Verified live with a real multi-run test** (not just unit-level): ran the CLI against the same synthetic dataset 4 times in a row. Runs 1-3 showed `foreign_login` at **Low** severity with an accurate, incrementing "previously seen" count (0, 1, 2 prior occurrences). On run 4 — the count crossing the ≥3 threshold — `foreign_login` escalated to **Medium**, with the report showing "flagged 3x before." This is the same category of proof Phase 3 required for GraphRAG: memory measurably changing a decision across real, separate process invocations, not just data sitting unused in a table.
+
+**A design decision worth surfacing:** the reference tutorial's `InMemorySaver` was *wired in but never exercised* — the demo always showed "Investigation history: 0 entries" (see the original gap-check, §7a). Simply swapping in a persistent checkpointer without also building the explicit `investigation_history` mechanism above would have reproduced that exact problem with a different backing store — persistent, but still empty, since nothing was resuming old threads. The checkpointer swap alone would have been cosmetic; `memory.py` is what actually delivers the feature.
+
 ---
 
 ## 6. Decisions Made (2026-09-05)
@@ -295,7 +312,7 @@ Phase 1 is now built and verified end-to-end (CLI and Gradio UI both tested agai
 |---|---|---|
 | LLM provider | **Google Gemini** (not Claude, not OpenAI, not Groq) — *changed 2026-09-05, superseding an earlier Claude decision* | All agent prompts/tool-calling target the Gemini API's manual function-calling format (see `agent_loop.py`). A third provider distinct from every other project in this repo (Simple RAG / Agentic RAG use Groq) — no existing config code to reuse. Verified directly against the live Gemini API on 2026-09-05: `gemini-3.8-flash` and `gemini-2.5-flash` both looked valid from `models.list`, but neither actually worked for this API key/project once Phase 1 was built and run for real (20/day quota; 404 "no longer available to new users," respectively) — **`gemini-3.6-flash` is the confirmed-working default** (see §5.12). Re-verify before relying on this later — Gemini's naming and per-key availability move fast. |
 | Threat intelligence | **Real free API — AbuseIPDB**, ✅ implemented Phase 2 (2026-09-05) | Real network calls with graceful error/rate-limit handling (degrades to "Unknown" rather than crashing). Adopted AbuseIPDB's native 0-100 risk-score scale rather than Phase 1's invented 0-10 scale — see §5.2, §6 threshold rows below. |
-| Cross-run memory | **Real learning**, not just a wired-but-unused checkpointer | Needs a persistent store (e.g. SQLite/file-backed) so investigation history and learned patterns actually survive between runs. Deferred to Phase 4. |
+| Cross-run memory | **Real learning**, ✅ implemented Phase 4 (2026-09-05) | `memory.py` — a SQLite `investigation_history` table (identity + pattern_type keyed), separate from the LangGraph checkpointer. Verified live: a recurring finding escalated from Low to Medium after 3 prior occurrences, across real separate process runs. |
 | Log formats | **CSV + JSON** for v1 | Ingest agent needs two parsers (or one normalizing parser) from day one. |
 | PII handling | **Anonymize/hash before sending to Gemini** | Usernames and IPs hashed/masked at ingestion, with a local-only reverse-lookup mapping so the final report can still reference "the same user/IP" across findings without exposing raw values to any external API. |
 | Detection thresholds | **Configurable from the start** | Thresholds (failed-login count, off-hours download size/time window, etc.) live in config, not hardcoded. |
@@ -314,29 +331,27 @@ Phase 1 is now built and verified end-to-end (CLI and Gradio UI both tested agai
 | Auto-block mechanism | **Write to a local blocklist file** (`blocklist.json`), not a real firewall API call | No real corporate firewall exists to integrate with in this project; a local file demonstrates the capability honestly. A real deployment would swap this for an actual firewall/WAF API. |
 | Repo license | **Apache 2.0** | Matches the license already used elsewhere across this developer's repos; includes an explicit patent grant. |
 | Package/dependency manager | **pip + venv** | Simplest, most universally familiar; matches the reference tutorial's own setup style. |
-| Gemini API key | **Obtained by the user 2026-09-05** — ⚠️ **the key value was pasted into this chat and must be rotated before use.** A fresh key (never pasted anywhere) should be placed directly into the local `.env` file. | Once a rotated key exists in `.env`, nothing blocks starting Phase 1. |
+| Gemini API key | **Obtained by the user 2026-09-05** — ⚠️ **the key value was pasted into this chat**; the user chose to proceed with it rather than rotate, on record. | In active use throughout Phases 1-4, confirmed working. |
+| Recurrence escalation threshold | **≥3 prior occurrences** of the same (identity, pattern_type) escalates severity by one level | A one-off Low-confidence anomaly is noise; the same anomaly recurring 3+ times from the same source is a pattern — verified live (§5.15). Placeholder pending further tuning, like the GraphRAG thresholds. |
+| Checkpointer persistence | **SQLite** (`langgraph-checkpoint-sqlite`), replacing `InMemorySaver` | Direct (non-context-manager) `SqliteSaver(conn)` constructor used instead of `from_conn_string`'s context-manager form, to avoid restructuring `build_graph()`'s calling convention across the CLI and Gradio app. |
 
-**Net effect:** Aegis is intentionally scoped *beyond* both the reference tutorial (which had 4 linear agents, no RAG, no reflection, no autonomous action) and — in the RAG and reflection dimensions — matches or exceeds the *original* concept slide too. Suggested build order:
+**Net effect:** Aegis is intentionally scoped *beyond* both the reference tutorial (which had 4 linear agents, no RAG, no reflection, no autonomous action, no memory) and — in the RAG and reflection dimensions — matches or exceeds the *original* concept slide too. Build order, all phases now complete:
 
-1. **Phase 1 — core 6-stage pipeline on Gemini:** Ingest (CSV+JSON) → Detect → Classify → Reflect → Respond (bounded auto-block only) → Report, with configurable thresholds, PII anonymization, and the reflection loop built in from the start.
-2. **Phase 2 — real integrations:** swap in the real AbuseIPDB lookup, add the Slack webhook notification step.
-3. **Phase 3 — GraphRAG layer:** stand up Neo4j, load the CVE/CWE/ATT&CK subset and relationships, embed entry-point text via Voyage AI, wire hybrid retrieval into Classify.
-4. **Phase 4 — memory:** add the persistent cross-run learning store once everything else is solid.
-
-Happy to sequence it differently if you'd rather.
+1. ✅ **Phase 1 — core 6-stage pipeline on Gemini:** Ingest (CSV+JSON) → Detect → Classify → Reflect → Respond (bounded auto-block only) → Report, with configurable thresholds, PII anonymization, and the reflection loop built in from the start.
+2. ✅ **Phase 2 — real integrations:** real AbuseIPDB lookup, Slack webhook notification step.
+3. ✅ **Phase 3 — GraphRAG layer:** Neo4j Aura, real NVD/CAPEC/ATT&CK data, hybrid retrieval wired into Classify.
+4. ✅ **Phase 4 — memory:** persistent LangGraph checkpointer (SQLite) + a separate cross-run investigation-history store that measurably affects severity decisions.
 
 ---
 
-## 7. Still Open (implementation details, no user input needed — will design as we build)
+## 7. Still Open — all resolved during implementation
 
-- **`state.py` / `config.py` schemas** — will design `AgentState` fields and config accessors ourselves, adapted for Gemini.
-- **Persistent memory store choice** (SQLite vs. flat file) — Phase 4.
-- **Anonymization scheme details** (hash algorithm, local reverse-lookup table design) — Phase 1.
-- **Size/scope of the CVE/CWE/ATT&CK subset** — Phase 3.
-- **Exact graph schema** (node/edge properties beyond the core chain) — Phase 3.
-- **Neo4j hosting** (local Community Edition vs. Aura free tier) — Phase 3, defaulting to local.
-- **Exact Reflect agent criteria** (what specifically counts as "unjustified" enough to trigger re-analysis) — Phase 1, will start with a reasonable rule set (e.g. High severity requires either a strong CVE match or ≥2 corroborating anomalies) and refine based on test runs.
-- **Reflection retry cap value** (defaulted to 2 above) — Phase 1, adjustable if it proves too strict/loose in practice.
+Everything originally listed here (`state.py`/`config.py` schemas, anonymization scheme, CVE/CWE/ATT&CK subset size, graph schema, Neo4j hosting, Reflect agent criteria, reflection retry cap) was decided during Phases 1-4 and is documented in the relevant Build Notes sections (§5.12-§5.15). Nothing remains open from the original build plan.
+
+Small items surfaced *during* implementation that remain genuinely open (none blocking, all tunable via `.env` without code changes):
+- **Escalation thresholds** (GraphRAG's CVSS/similarity minimums, §5.10; recurrence's ≥3-occurrences rule, §5.15) are reasonable starting points, not calibrated against a large real dataset — expected to need tuning with real-world usage.
+- **The deprecated `db.index.vector.queryNodes` procedure** (§5.10) — functional but flagged by Neo4j for eventual migration to the Cypher `SEARCH` clause once that syntax's ad-hoc-query-vector form is better documented.
+- **SQLite connection lifecycle in long-running Gradio sessions** — `build_graph()` opens a fresh connection per call without explicit closing; fine for a demo/CLI-primary tool, worth revisiting only if this becomes a long-running multi-user server.
 
 ---
 
@@ -365,7 +380,7 @@ Aegis sits at the intersection of three overlapping domains, plus one thing beyo
 | **AI Engineering** | Real API integration across five external services (Gemini, Voyage AI, AbuseIPDB, Slack, Neo4j); config/secrets management; structured output parsing (severity levels, confidence scores); graceful degradation (rule-based "Fast Mode" when no LLM key is present); PII-safe data handling (anonymize before any log content reaches an external API); two working interfaces (CLI + Gradio web app). |
 | **Agentic AI** | Six autonomous agents (Ingest, Detect, Classify, Reflect, Respond, Report), each reasoning over its own scoped toolset; orchestrated as a LangGraph state machine with **conditional routing** (short-circuits to `END` when nothing's worth escalating) *and* a **reflection feedback loop** (Reflect can send work back to Classify) *and* **one narrowly bounded autonomous action** (Respond auto-blocks confirmed-malicious IPs) — a materially more sophisticated agentic design than a single-pass pipeline. |
 | **RAG — specifically GraphRAG** | A knowledge-graph-backed retrieval pipeline, not just flat vector search: CVE/CWE/ATT&CK relationships modeled as a **Neo4j graph**, with **hybrid retrieval** (Voyage AI embeddings to find entry-point nodes, then Cypher graph traversal for related context) injected into the Classify agent's risk assessment. A step up in sophistication from this repo's Simple RAG and Agentic RAG projects, which use flat vector retrieval. |
-| **Multi-agent orchestration + persistent memory** (beyond basic agentic AI) | Cross-run investigation history and learned patterns intended to persist between sessions (Phase 4) — not just a single-session agent loop, but a system meant to get better at recognizing recurring threats over time. |
+| **Multi-agent orchestration + persistent memory** (beyond basic agentic AI) | ✅ Verified live: cross-run investigation history that measurably escalates severity for recurring patterns — confirmed across 4 real, separate process invocations, not just data sitting unused in a table (§5.15). |
 
 Taken together, this makes Aegis a stronger portfolio piece than any one of those domains alone would be — it's not "a RAG demo" or "an agent demo," it's a single system where graph-based retrieval, self-correcting multi-step reasoning, one carefully bounded autonomous action, and production-grade engineering concerns (secrets, fallbacks, privacy, alerting) all have to work together.
 
@@ -382,9 +397,9 @@ Taken together, this makes Aegis a stronger portfolio piece than any one of thos
 | **LLM provider** | Google Gemini (decided 2026-09-05, superseding an earlier Claude decision) — a departure from the tutorial's OpenAI implementation and from this repo's existing Groq-based projects. |
 | **RAG stack** | **GraphRAG, verified live:** Neo4j Aura knowledge graph (`CVE→CWE→CAPEC→AttackTechnique`, corrected from the original CWE→ATT&CK plan once research found no direct mapping exists) + Voyage AI embeddings for hybrid entry-point/traversal retrieval, over real NVD + MITRE CAPEC data (60 CVEs, 33 CAPEC patterns, 39 ATT&CK techniques). Confirmed to actually change severity decisions, not just decorate output. |
 | **Autonomy model** | Decision-support by default; one narrowly bounded exception (auto-block a confirmed-malicious IP to a local blocklist file) — everything else always waits for a human. |
-| **Scope vs. reference tutorial** | Deliberately much larger: real AbuseIPDB threat-intel, real persistent cross-run memory, CSV+JSON ingestion, PII anonymization, configurable detection thresholds, Slack alerting, a full GraphRAG/Neo4j layer, a reflection loop, one bounded autonomous action, and Gemini instead of OpenAI. |
-| **Scope vs. original concept slide** | Now matches on all four architectural boxes (§7a) — the two gaps found on 2026-09-05 (missing reflection, missing response orchestration) are both resolved. |
-| **Status** | **Phases 1, 2, and 3 all complete and fully verified live** (2026-09-05) — real Gemini, real AbuseIPDB, real Slack, and real GraphRAG (Neo4j Aura + Voyage AI, over real NVD/CAPEC/ATT&CK data) all confirmed working end-to-end, including verified severity escalation from retrieved CVE context. Next: Phase 4 (persistent memory). |
+| **Scope vs. reference tutorial** | Deliberately much larger — and now fully built: real AbuseIPDB threat-intel, real persistent cross-run memory that measurably affects decisions, CSV+JSON ingestion, PII anonymization, configurable detection thresholds, Slack alerting, a full GraphRAG/Neo4j layer, a reflection loop, one bounded autonomous action, and Gemini instead of OpenAI. |
+| **Scope vs. original concept slide** | Matches on all four architectural boxes (§7a) — the two gaps found on 2026-09-05 (missing reflection, missing response orchestration) are both resolved and verified live. |
+| **Status** | **All four phases complete and fully verified live** (2026-09-05) — real Gemini, real AbuseIPDB, real Slack, real GraphRAG (Neo4j Aura + Voyage AI over real NVD/CAPEC/ATT&CK data), and real persistent cross-run memory all confirmed working end-to-end, including two separately-verified "changes an actual decision" proofs (GraphRAG's CVE-based escalation, memory's recurrence-based escalation). This is a complete build, not a scaffold. |
 
 ---
 

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from langgraph.checkpoint.memory import InMemorySaver
+import sqlite3
+
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 
-from .config import get_thresholds
+from .config import get_checkpoint_db_path, get_thresholds
 from .nodes.classify import classify_node
 from .nodes.detect import detect_node
 from .nodes.ingest import ingest_node
@@ -50,5 +52,9 @@ def build_graph():
 
     graph.add_edge("report", END)
 
-    checkpointer = InMemorySaver()
+    # Persistent (Phase 4) — was InMemorySaver in Phases 1-3. check_same_thread=False
+    # because Gradio's analyze() may run on a different thread than the connection
+    # was opened on; each build_graph() call still gets its own connection.
+    conn = sqlite3.connect(get_checkpoint_db_path(), check_same_thread=False)
+    checkpointer = SqliteSaver(conn)
     return graph.compile(checkpointer=checkpointer)

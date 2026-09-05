@@ -23,7 +23,8 @@ _SYSTEM_PROMPT = (
     "## Summary\n(counts by severity)\n"
     "## Findings by Severity\n(group High/Medium/Low, one bullet per finding — if a "
     "finding has graph_context.matches, cite the top match's CVE ID, CVSS score, "
-    "and any ATT&CK technique IDs it maps to)\n"
+    "and any ATT&CK technique IDs it maps to; if a finding has history_context, "
+    "note it as previously seen with its times_flagged count and first_seen date)\n"
     "## Actions Taken Automatically\n(list any auto-blocked IPs; write 'None' if empty)\n"
     "## Recommended Actions For You\nsplit into Immediate and Urgent\n\n"
     "Be precise and avoid fluff. User/IP identifiers are hashed tokens — refer "
@@ -61,6 +62,12 @@ def _fallback_report(findings: list[dict], autonomous_actions: list[dict]) -> st
                     if a.get("attack_id"):
                         cve_line += f" → ATT&CK {a['attack_id']} ({a.get('attack_name', '')})"
                 lines.append(cve_line)
+            history = f.get("history_context")
+            if history:
+                lines.append(
+                    f"  - Previously seen: flagged {history['times_flagged']}x before "
+                    f"(first seen {history['first_seen'][:10]})"
+                )
 
     lines += ["", "## Actions Taken Automatically"]
     if autonomous_actions:

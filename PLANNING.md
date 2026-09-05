@@ -32,7 +32,8 @@ aegis/
 │       ├── state.py              # AgentState schema (Phase 1)
 │       ├── config.py             # env/config accessors, get_llm(), thresholds (Phase 1)
 │       ├── anonymize.py          # PII hashing + local reverse-lookup (Phase 1)
-│       ├── graph.py              # StateGraph wiring, incl. reflection loop (Phase 1)
+│       ├── memory.py             # cross-run investigation_history SQLite store (Phase 4)
+│       ├── graph.py              # StateGraph wiring, incl. reflection loop (Phase 1) + persistent checkpointer (Phase 4)
 │       ├── run.py                # CLI entrypoint (Phase 1)
 │       ├── nodes/
 │       │   ├── __init__.py
@@ -140,17 +141,20 @@ aegis/
 
 ---
 
-## 5. Phase 4 — Persistent Cross-Run Memory
+## 5. Phase 4 — Persistent Cross-Run Memory ✅ COMPLETE AND VERIFIED LIVE (2026-09-05)
 
 **Goal:** Aegis remembers past investigations across runs and references them ("this IP was flagged 3 runs ago too").
 
-### Tasks
-1. Replace `InMemorySaver` in `graph.py` with a persistent LangGraph checkpointer (SQLite-backed — check the current LangGraph checkpointer library for the SQLite option).
-2. Design a lightweight "investigation history" schema (e.g. a `history` table: IP/user hash, first-seen, last-seen, times-flagged, past-severities).
-3. Add a step (or extend Reflect) to check new findings against investigation history and note recurrence ("this IP has been flagged 3 times this month") in the report.
+**No new API keys needed** — this phase is fully local (SQLite is Python stdlib; the LangGraph checkpointer package is the only new dependency).
 
-### Definition of done
-- Running Aegis twice on the same recurring malicious IP shows the second report explicitly noting "previously flagged," with a real historical count.
+### Tasks — all complete
+1. ✅ Replaced `InMemorySaver` in `graph.py` with `langgraph-checkpoint-sqlite`'s `SqliteSaver`, backed by `data/checkpoints.sqlite`. Used the direct `SqliteSaver(conn)` constructor rather than `from_conn_string(...)`'s context-manager form, to avoid restructuring `build_graph()`'s calling convention.
+2. ✅ **`memory.py`** (new module) — `investigation_history` SQLite table (`data/investigation_history.sqlite`), keyed by `(identity, pattern_type)`: `times_flagged`, `first_seen`, `last_seen`, `last_severity`. Deliberately a separate mechanism from the checkpointer — see PROJECT_DOCUMENTATION.md §5.15 for why the checkpointer swap alone wouldn't have delivered this feature.
+3. ✅ Wired in: `classify.py` checks history (read-only) and can escalate severity by one level at ≥3 prior occurrences; `respond.py` records this run's findings into history exactly once, after Reflect's loop concludes (so retries within one run don't inflate the count); `report.py` cites "previously seen" per finding.
+4. Also removed dead code found while in `tools/classification.py` (`classify_findings` was defined but never called from anywhere).
+
+### Definition of done — verified with a real 4-run test ✅
+- ✅ Ran the CLI against the same synthetic dataset 4 times in a row. Runs 1-3: `foreign_login` stayed **Low** severity, with an accurate incrementing "previously seen" count each time (0 → 1 → 2 prior occurrences). Run 4 (crossing the ≥3 threshold): `foreign_login` escalated to **Medium**, report showing "flagged 3x before." Confirmed this is memory changing a real decision across separate process invocations, not just data sitting unused in a table.
 
 ---
 

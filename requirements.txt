@@ -12,4 +12,5 @@ requests>=2.31          # AbuseIPDB lookups + Slack webhook posts
 neo4j>=5.20             # graph store driver
 voyageai>=0.2           # embeddings for hybrid retrieval
 
-# Phase 4 — persistent memory: sqlite3 is Python stdlib, no extra dependency needed
+# Phase 4 — persistent memory
+langgraph-checkpoint-sqlite>=2.0   # persistent LangGraph checkpointer (investigation_history itself uses stdlib sqlite3, no extra dependency)

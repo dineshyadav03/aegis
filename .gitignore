@@ -23,6 +23,10 @@ reports/*.md
 # Neo4j local data (Phase 3)
 neo4j_data/
 
+# Persistent runtime state (Phase 4) — local, not source
+data/*.sqlite
+data/*.sqlite3
+
 # IDE
 .vscode/
 .idea/

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..config import get_thresholds
+from ..config import RECURRING_MIN_TIMES_FLAGGED, get_thresholds
 
 _DESCRIPTIONS = {
     "brute_force": "Repeated failed login attempts against the same account from the same source.",
@@ -26,6 +26,7 @@ def risk_assessor_tool(
     item: dict[str, Any],
     threat_intel: dict[str, Any] | None = None,
     graph_context: dict[str, Any] | None = None,
+    history_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Tool: assign a severity (High/Medium/Low) to a detected pattern/anomaly.
 
@@ -43,6 +44,12 @@ def risk_assessor_tool(
     GraphRAG actually change decisions rather than just decorate the report.
     Thresholds (CVSS >= 7.0, similarity >= 0.5) are a starting point pending
     live tuning once Neo4j/Voyage AI credentials are available.
+
+    history_context (Phase 4, cross-run memory — PROJECT_DOCUMENTATION.md
+    §5.15) can likewise escalate by one level when the same identity has
+    triggered this same pattern_type at least RECURRING_MIN_TIMES_FLAGGED
+    times before — a one-off Low-confidence anomaly is noise; the same
+    anomaly recurring repeatedly from the same source is a pattern.
     """
     kind = item.get("pattern") or item.get("anomaly")
     confidence = float(item.get("confidence", 0.5))
@@ -75,6 +82,12 @@ def risk_assessor_tool(
             elif severity == "Medium":
                 severity = "High"
 
+    if history_context and history_context.get("times_flagged", 0) >= RECURRING_MIN_TIMES_FLAGGED:
+        if severity == "Low":
+            severity = "Medium"
+        elif severity == "Medium":
+            severity = "High"
+
     return {"severity": severity, "risk_score": risk_score, "confidence": confidence}
 
 
@@ -86,18 +99,3 @@ def context_enricher_tool(item: dict[str, Any]) -> dict[str, Any]:
     """
     kind = item.get("pattern") or item.get("anomaly")
     return {"description": _DESCRIPTIONS.get(kind, "Unclassified security event.")}
-
-
-def classify_findings(
-    anomalies: list[dict[str, Any]],
-    threat_lookup: Any,
-) -> list[dict[str, Any]]:
-    """Runs risk assessment + context enrichment over every detected item."""
-    findings = []
-    for item in anomalies:
-        ip = item.get("ip")
-        intel = threat_lookup(ip) if ip else None
-        risk = risk_assessor_tool(item, intel)
-        context = context_enricher_tool(item)
-        findings.append({**item, **risk, **context, "threat_intel": intel})
-    return findings

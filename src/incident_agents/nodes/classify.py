@@ -9,6 +9,13 @@ CVE/CWE/ATT&CK context can escalate severity by one level when a similar,
 high-CVSS real-world CVE is found — see tools/classification.py's
 risk_assessor_tool. Gracefully skipped (no escalation) if Neo4j/Voyage AI
 aren't configured.
+
+Phase 4 (cross-run memory, PROJECT_DOCUMENTATION.md §5.15): each item is
+checked against investigation_history (keyed by source IP + pattern type)
+for prior occurrences across past runs, which can likewise escalate
+severity for a recurring pattern. The check here is read-only — Respond
+records this run's findings into history exactly once, after Reflect's
+loop concludes, so retries within one run don't inflate the count.
 """
 
 from __future__ import annotations
@@ -18,6 +25,7 @@ import json
 from ..agent_loop import simple_generate
 from ..anonymize import Anonymizer
 from ..config import get_client, get_model_name, get_temperature
+from ..memory import check_history
 from ..state import AgentState
 from ..tools.classification import context_enricher_tool, risk_assessor_tool
 from ..tools.graphrag import cve_graph_retrieval_tool
@@ -38,10 +46,14 @@ def classify_node(state: AgentState) -> AgentState:
     findings = []
     for item in anomalies:
         context = context_enricher_tool(item)
-        query_text = f"{item.get('pattern') or item.get('anomaly')}: {context['description']}"
+        pattern_type = item.get("pattern") or item.get("anomaly")
+        query_text = f"{pattern_type}: {context['description']}"
         graph_context = cve_graph_retrieval_tool(query_text)
-        risk = risk_assessor_tool(item, item.get("threat_intel"), graph_context)
-        findings.append({**item, **risk, **context, "graph_context": graph_context})
+        history_context = check_history(item.get("ip"), pattern_type)
+        risk = risk_assessor_tool(item, item.get("threat_intel"), graph_context, history_context)
+        findings.append(
+            {**item, **risk, **context, "graph_context": graph_context, "history_context": history_context}
+        )
 
     trail = list(state.get("reasoning_trail", []))
     client = get_client()
