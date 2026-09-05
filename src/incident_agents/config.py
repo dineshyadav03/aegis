@@ -15,11 +15,19 @@ load_dotenv()
 # — so the SDK's "use Chat.send_message instead" nudge doesn't apply here.
 logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 
-DEFAULT_MODEL = "gemini-3.8-flash"
+DEFAULT_MODEL = "gemini-3.6-flash"  # confirmed working end-to-end during Phase 1 — see PROJECT_DOCUMENTATION.md §5.12
 
 
 def get_gemini_key() -> str | None:
     return os.environ.get("GEMINI_API_KEY")
+
+
+def get_abuseipdb_key() -> str | None:
+    return os.environ.get("ABUSEIPDB_API_KEY")
+
+
+def get_slack_webhook_url() -> str | None:
+    return os.environ.get("SLACK_WEBHOOK_URL")
 
 
 def get_model_name() -> str:
@@ -47,7 +55,12 @@ class Thresholds:
     brute_force_min_attempts: int = 5
     off_hours_cutoff_hour: int = 5
     off_hours_min_bytes: int = 1_000_000
-    auto_block_min_risk_score: float = 8.0
+    # risk_score is on AbuseIPDB's native 0-100 abuseConfidenceScore scale
+    # (Phase 1's mock used an invented 0-10 scale; Phase 2 adopts the real
+    # API's scale directly rather than converting, see PROJECT_DOCUMENTATION.md).
+    high_risk_score: float = 80.0
+    suspicious_risk_score: float = 25.0
+    auto_block_min_risk_score: float = 80.0
     max_reflection_retries: int = 2
 
 
@@ -56,7 +69,9 @@ def get_thresholds() -> Thresholds:
         brute_force_min_attempts=int(os.environ.get("AEGIS_BRUTE_FORCE_MIN_ATTEMPTS", "5")),
         off_hours_cutoff_hour=int(os.environ.get("AEGIS_OFF_HOURS_CUTOFF_HOUR", "5")),
         off_hours_min_bytes=int(os.environ.get("AEGIS_OFF_HOURS_MIN_BYTES", "1000000")),
-        auto_block_min_risk_score=float(os.environ.get("AEGIS_AUTO_BLOCK_MIN_RISK_SCORE", "8.0")),
+        high_risk_score=float(os.environ.get("AEGIS_HIGH_RISK_SCORE", "80.0")),
+        suspicious_risk_score=float(os.environ.get("AEGIS_SUSPICIOUS_RISK_SCORE", "25.0")),
+        auto_block_min_risk_score=float(os.environ.get("AEGIS_AUTO_BLOCK_MIN_RISK_SCORE", "80.0")),
         max_reflection_retries=int(os.environ.get("AEGIS_MAX_REFLECTION_RETRIES", "2")),
     )
 

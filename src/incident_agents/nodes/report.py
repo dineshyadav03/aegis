@@ -15,6 +15,7 @@ from ..agent_loop import simple_generate
 from ..anonymize import Anonymizer
 from ..config import get_client, get_model_name, get_temperature
 from ..state import AgentState
+from ..tools.alerting import send_slack_alert
 
 _SYSTEM_PROMPT = (
     "You are a security analyst. Write a succinct Markdown incident report. "
@@ -109,4 +110,14 @@ def report_node(state: AgentState) -> AgentState:
         if client is None:
             trail.append("Report: generated via fallback template [Fast Mode: no API key].")
 
-    return {**state, "report": report, "reasoning_trail": trail}
+    slack_notified = False
+    high_count = sum(1 for f in findings if f.get("severity") == "High")
+    if high_count > 0:
+        summary = (
+            f"🛡️ Aegis: {high_count} High-severity finding(s) detected "
+            f"({len(autonomous_actions)} IP(s) auto-blocked). Full report generated — see Aegis output."
+        )
+        slack_notified = send_slack_alert(summary)
+        trail.append(f"Report: Slack alert {'sent' if slack_notified else 'not sent (no webhook configured or post failed)'}.")
+
+    return {**state, "report": report, "slack_notified": slack_notified, "reasoning_trail": trail}

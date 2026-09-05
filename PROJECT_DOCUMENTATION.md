@@ -122,7 +122,7 @@ Concretely, each ReAct-based node tries `langgraph.prebuilt.create_react_agent(m
 - **`anomaly_detector_tool`** (rule-based, thresholds configurable):
   - **Off-hours large download:** event hour < configurable cutoff (default 5) AND bytes ≥ configurable size (default 1,000,000) → confidence 0.7
   - **Geographic anomaly** (`foreign_login`): login from an unexpected country/region
-- **`threat_lookup_tool(ip)`:** **real AbuseIPDB lookup** (§6) — returns actual `risk_score`/`reputation` data for the IP, replacing the reference tutorial's hardcoded mock.
+- **`threat_lookup_tool(ip)`:** **real AbuseIPDB lookup** (Phase 2, ✅ implemented 2026-09-05) — calls `GET /api/v2/check`, returns `risk_score` on AbuseIPDB's **native 0-100 `abuseConfidenceScore` scale** (Phase 1's mock used an invented 0-10 scale; Phase 2 adopts the real API's scale directly — thresholds updated accordingly, see §6). No key configured, a network error, or a rate-limit hit all degrade gracefully to `reputation: "Unknown"` rather than crashing the pipeline. One documented exception: the synthetic dataset's planted attacker IP (`198.51.100.23`, an RFC 5737 test-net address) is served from a small hardcoded demo-override map instead of the real API, since reserved documentation IPs will never have real abuse reports — see `tools/threat_intel.py`.
 - **Output:** combined `anomalies` list (pattern-based + statistical) with per-item confidence.
 
 ### 5.3 Classify Agent (`nodes/classify.py`)
@@ -155,7 +155,7 @@ This is the "Response Orchestration Agent (autonomous response)" from the origin
   - Findings by severity, each with CVE/CWE/ATT&CK context where available
   - **⚡ Actions Taken Automatically** (IPs auto-blocked by Respond, if any)
   - **Recommended Actions For You** — split into 🚨 **Immediate** (reset compromised passwords, isolate systems, initiate IR procedures) and ⚠️ **Urgent** (review/update access controls, enable MFA, monitor affected accounts)
-  - A **Slack notification** fires on any High-severity finding (§6), separate from the Markdown report file.
+  - A **Slack notification** (Phase 2, ✅ implemented) fires via an Incoming Webhook post on any High-severity finding — a short summary, not the full report. Best-effort: no webhook configured, or the post failing, degrades to a `slack_notified: false` state field and a reasoning-trail note, never a crash.
 
 ### 5.7 Graph Wiring (`graph.py`)
 ```python
@@ -258,6 +258,18 @@ Phase 1 is now built and verified end-to-end (CLI and Gradio UI both tested agai
 
 **Operational discovery — Gemini model quota:** `gemini-3.8-flash`'s free tier caps at 20 requests/day (hit mid-testing). `gemini-2.5-flash` returned "no longer available to new users" for this API key/project. Settled on **`gemini-3.6-flash`** as the working default — confirmed via live testing to have a workable free-tier quota and to be genuinely accessible to this key (unlike the other two). `AEGIS_MODEL` remains a one-line `.env` change to any model the key can access.
 
+### 5.13 Phase 2 Build Notes (2026-09-05) — real AbuseIPDB + Slack
+
+**Real AbuseIPDB integration built** (`tools/threat_intel.py`): `GET https://api.abuseipdb.com/api/v2/check`, `Key` header auth, graceful fallback (no key / network error / rate-limit → `reputation: "Unknown"`, never a crash) — verified via the code's fallback path (real API calls pending the user obtaining a key, per their own choice in §6).
+
+**Scale change:** AbuseIPDB's real `abuseConfidenceScore` is 0-100, not the 0-10 scale Phase 1's mock invented. Rather than converting incoming scores to match the old scale, Aegis now uses AbuseIPDB's native scale everywhere — `Thresholds.high_risk_score` and `auto_block_min_risk_score` both default to `80.0` (was `8.0`). This is a cleaner design than a conversion layer nobody else would expect.
+
+**A real gap between demo data and a real API:** the synthetic dataset's planted "attacker" IP (`198.51.100.23`) is an RFC 5737 documentation/test-net address — deliberately chosen so a public repo never ships a real malicious IP as a test fixture. But that also means it can **never** have real AbuseIPDB reports, silently breaking the auto-block demo once the mock was replaced with a real call. Fixed with a small, explicitly-documented override map in `tools/threat_intel.py` for just that one test IP — every other IP goes through the real API untouched. This is a design tension worth knowing about for anyone adapting this pattern: synthetic security data and real threat-intel APIs don't naturally agree, and papering over that silently would have been worse than documenting it.
+
+**Slack alerting built** (`tools/alerting.py`): posts a short summary (not the full report) to an Incoming Webhook on any High-severity finding; best-effort, `slack_notified` state field records whether it actually sent.
+
+**Status:** code complete and verified via all fallback paths (no-key, rate-limit-shaped errors, no-webhook). Full live verification against real AbuseIPDB/Slack pending the user adding real credentials to their local `.env` (their choice, §6) — nothing in the code needs to change when they do, per the standard "no key → fallback, key present → real call" pattern already established for Gemini.
+
 ---
 
 ## 6. Decisions Made (2026-09-05)
@@ -265,13 +277,15 @@ Phase 1 is now built and verified end-to-end (CLI and Gradio UI both tested agai
 | Question | Decision | Implication |
 |---|---|---|
 | LLM provider | **Google Gemini** (not Claude, not OpenAI, not Groq) — *changed 2026-09-05, superseding an earlier Claude decision* | All agent prompts/tool-calling target the Gemini API's manual function-calling format (see `agent_loop.py`). A third provider distinct from every other project in this repo (Simple RAG / Agentic RAG use Groq) — no existing config code to reuse. Verified directly against the live Gemini API on 2026-09-05: `gemini-3.8-flash` and `gemini-2.5-flash` both looked valid from `models.list`, but neither actually worked for this API key/project once Phase 1 was built and run for real (20/day quota; 404 "no longer available to new users," respectively) — **`gemini-3.6-flash` is the confirmed-working default** (see §5.12). Re-verify before relying on this later — Gemini's naming and per-key availability move fast. |
-| Threat intelligence | **Real free API — AbuseIPDB** instead of the tutorial's mocked lookup | Needs a real AbuseIPDB API key (free tier: 1,000 checks/day) and real network calls with rate-limit/error handling. |
+| Threat intelligence | **Real free API — AbuseIPDB**, ✅ implemented Phase 2 (2026-09-05) | Real network calls with graceful error/rate-limit handling (degrades to "Unknown" rather than crashing). Adopted AbuseIPDB's native 0-100 risk-score scale rather than Phase 1's invented 0-10 scale — see §5.2, §6 threshold rows below. |
 | Cross-run memory | **Real learning**, not just a wired-but-unused checkpointer | Needs a persistent store (e.g. SQLite/file-backed) so investigation history and learned patterns actually survive between runs. Deferred to Phase 4. |
 | Log formats | **CSV + JSON** for v1 | Ingest agent needs two parsers (or one normalizing parser) from day one. |
 | PII handling | **Anonymize/hash before sending to Gemini** | Usernames and IPs hashed/masked at ingestion, with a local-only reverse-lookup mapping so the final report can still reference "the same user/IP" across findings without exposing raw values to any external API. |
 | Detection thresholds | **Configurable from the start** | Thresholds (failed-login count, off-hours download size/time window, etc.) live in config, not hardcoded. |
-| Downstream alerting | **Slack webhook notification** on High-severity findings | Needs a Slack incoming webhook URL. |
+| Downstream alerting | **Slack webhook notification** on High-severity findings, ✅ implemented Phase 2 | `tools/alerting.py` — best-effort post, never blocks the pipeline on failure. |
 | Threat-intel API | **AbuseIPDB** | Free tier, purpose-built for IP abuse/reputation scoring. |
+| Risk-score scale | **AbuseIPDB's native 0-100** (not Phase 1's invented 0-10) | `Thresholds.high_risk_score`/`auto_block_min_risk_score` default to 80.0 accordingly (§Phase 2 Build Notes). |
+| Demo dataset vs. real threat intel | **Small hardcoded override** for the synthetic dataset's planted attacker IP | RFC 5737 test-net IPs (used deliberately so the public repo never ships a real malicious IP as a fixture) will never have real AbuseIPDB reports — the override keeps the demo deterministic without misrepresenting real API behavior for any other IP. |
 | RAG (CVE retrieval) | **Yes — add it**, even though the tutorial's actual code has none | Original concept slide called for "RAG with CVE database" (§7a). |
 | RAG type | **GraphRAG**, not plain vector RAG | CVE/CWE/ATT&CK data is inherently relational — a knowledge graph preserves that structure. |
 | Graph store | **Neo4j** | Real graph database queried via Cypher (free Community Edition / Aura tier). |
@@ -353,7 +367,7 @@ Taken together, this makes Aegis a stronger portfolio piece than any one of thos
 | **Autonomy model** | Decision-support by default; one narrowly bounded exception (auto-block a confirmed-malicious IP to a local blocklist file) — everything else always waits for a human. |
 | **Scope vs. reference tutorial** | Deliberately much larger: real AbuseIPDB threat-intel, real persistent cross-run memory, CSV+JSON ingestion, PII anonymization, configurable detection thresholds, Slack alerting, a full GraphRAG/Neo4j layer, a reflection loop, one bounded autonomous action, and Gemini instead of OpenAI. |
 | **Scope vs. original concept slide** | Now matches on all four architectural boxes (§7a) — the two gaps found on 2026-09-05 (missing reflection, missing response orchestration) are both resolved. |
-| **Status** | **Phase 1 complete and verified** (2026-09-05) — full CLI (`python -m src.incident_agents.run`) and Gradio web app both tested end-to-end against real Gemini calls and against synthetic CSV/JSON data, including the reflection loop, the bounded auto-block, PII hashing, and the clean-log short-circuit path. Two real bugs found via live testing were fixed (§5.12). Next: Phase 2 (real AbuseIPDB + Slack). |
+| **Status** | **Phase 1 complete and verified.** **Phase 2 code complete** (real AbuseIPDB + Slack, §5.13) — verified via all fallback paths; full live verification pending the user adding real API credentials to `.env` (their choice to obtain these themselves, no code changes needed once added). Next: Phase 3 (GraphRAG). |
 
 ---
 

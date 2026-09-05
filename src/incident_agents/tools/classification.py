@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..config import get_thresholds
+
 _DESCRIPTIONS = {
     "brute_force": "Repeated failed login attempts against the same account from the same source.",
     "privilege_escalation": "A user invoked elevated (sudo) privileges.",
@@ -31,8 +33,9 @@ def risk_assessor_tool(item: dict[str, Any], threat_intel: dict[str, Any] | None
     confidence = float(item.get("confidence", 0.5))
     risk_score = float((threat_intel or {}).get("risk_score", 0.0))
     reputation = (threat_intel or {}).get("reputation")
+    thresholds = get_thresholds()
 
-    if risk_score >= 8.0:
+    if risk_score >= thresholds.high_risk_score:
         severity = "High"
     elif kind == "brute_force" and item.get("count", 0) >= 10:
         severity = "High"

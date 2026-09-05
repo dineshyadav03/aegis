@@ -12,8 +12,8 @@ This is the execution plan. For *why* each decision was made, see [PROJECT_DOCUM
 | 2 | Python 3.11+ installed locally | ✅ Python 3.13.4 confirmed | Phase 1 |
 | 3 | Synthetic test dataset (`data/security_logs.csv` / `.json`) | ✅ **Built** — `scripts/generate_sample_logs.py`, 147 events with planted brute-force/off-hours/foreign-login/privilege-escalation signal | Phase 1 |
 | 4 | `.env` file with real secrets, based on `.env.example` | ✅ Created locally, gitignored, confirmed never staged | Phase 1 |
-| 5 | AbuseIPDB API key | Not yet obtained — free signup at [abuseipdb.com](https://www.abuseipdb.com/) | Phase 2 |
-| 6 | Slack incoming webhook URL | Not yet created — needs a Slack workspace + an app with Incoming Webhooks enabled | Phase 2 |
+| 5 | AbuseIPDB API key | ⏳ Code ready — user obtaining key themselves at [abuseipdb.com](https://www.abuseipdb.com/), add to `.env`'s `ABUSEIPDB_API_KEY` when ready | Phase 2 — live verification only |
+| 6 | Slack incoming webhook URL | ⏳ Code ready — user setting up themselves (Slack workspace + app with Incoming Webhooks), add to `.env`'s `SLACK_WEBHOOK_URL` when ready | Phase 2 — live verification only |
 | 7 | Voyage AI API key | Not yet obtained — free signup at [voyageai.com](https://www.voyageai.com/) | Phase 3 |
 | 8 | Neo4j instance (local Community Edition or Aura free tier) | Not yet set up | Phase 3 |
 | 9 | NVD/CWE/ATT&CK data downloaded | Not yet sourced — need to pick and download a subset | Phase 3 |
@@ -103,19 +103,20 @@ aegis/
 
 ---
 
-## 3. Phase 2 — Real Integrations
+## 3. Phase 2 — Real Integrations ✅ CODE COMPLETE (2026-09-05), live verification pending your credentials
 
 **Goal:** Detect's threat lookups use real AbuseIPDB data; a Slack channel gets notified on High-severity findings.
 
 ### Tasks
-1. Get an AbuseIPDB API key (free tier), add to `.env`.
-2. Rewrite `tools/threat_intel.py`'s `threat_lookup_tool` to call the real AbuseIPDB `/check` endpoint, with basic rate-limit handling (free tier: 1,000 checks/day) and a graceful fallback (treat as "unknown reputation" rather than crashing) if the API errors or the daily limit is hit.
-3. Create a Slack app + incoming webhook, add the URL to `.env`.
-4. Add `tools/alerting.py` with a `send_slack_alert(report_summary)` function; call it from `report.py` after report generation, only when at least one High-severity finding exists.
+1. ~~Get an AbuseIPDB API key (free tier), add to `.env`.~~ — your action; code doesn't need you to have done this to be complete.
+2. ✅ Rewrote `tools/threat_intel.py`'s `threat_lookup_tool` to call the real AbuseIPDB `/check` endpoint (verified endpoint/auth/response shape against current docs before writing code), with graceful fallback to `"Unknown"` on missing key, network error, or rate-limit (verified via the fallback path). Adopted AbuseIPDB's native 0-100 risk-score scale — see PROJECT_DOCUMENTATION.md §5.13 for why this changed from Phase 1's invented 0-10 scale.
+3. ~~Create a Slack app + incoming webhook, add the URL to `.env`.~~ — your action.
+4. ✅ Added `tools/alerting.py` with `send_slack_alert(summary)`; wired into `report.py` — fires only when at least one High-severity finding exists, best-effort (never crashes the pipeline), records success/failure in `state["slack_notified"]`.
 
 ### Definition of done
-- A real known-bad IP (or a test IP AbuseIPDB flags) produces a real, non-mocked risk score in a run's output.
-- A test run with a High-severity finding produces a real Slack message in the configured channel.
+- ✅ Fallback paths verified: no AbuseIPDB key → `"Unknown"` reputation, no crash; no Slack webhook → `slack_notified: false`, no crash.
+- ✅ The synthetic dataset's planted attacker IP still triggers auto-block correctly under the new real-API code path (via a documented demo override — see PROJECT_DOCUMENTATION.md §5.13 — since its RFC 5737 test-net address would otherwise show as harmless to any real threat-intel API).
+- ⏳ **Pending your credentials:** a real known-bad IP producing a real, non-mocked risk score; a real Slack message actually landing in your channel. No code changes needed once you add `ABUSEIPDB_API_KEY` / `SLACK_WEBHOOK_URL` to `.env` — just run the CLI again.
 
 ---
 

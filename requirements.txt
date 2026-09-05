@@ -5,8 +5,8 @@ pandas>=2.0
 python-dotenv>=1.0
 gradio>=4.0
 
-# Phase 2 — real integrations (uncomment when Phase 2 starts)
-# requests>=2.31          # AbuseIPDB lookups + Slack webhook posts
+# Phase 2 — real integrations
+requests>=2.31          # AbuseIPDB lookups + Slack webhook posts
 
 # Phase 3 — GraphRAG (uncomment when Phase 3 starts)
 # neo4j>=5.20             # graph store driver
