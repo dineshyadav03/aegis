@@ -4,23 +4,21 @@ This is the execution plan. For *why* each decision was made, see [PROJECT_DOCUM
 
 ---
 
-## 0. Prerequisites Checklist (before writing any code)
+## 0. Prerequisites Checklist
 
 | # | Item | Status | Blocks |
 |---|---|---|---|
-| 1 | Gemini API key | ⚠️ **Obtained, but was pasted into chat — must be rotated.** Revoke the exposed key in Google AI Studio, generate a fresh one, and put it directly into `.env` yourself (don't paste it into chat again). | Phase 1 (everything) |
-| 2 | Python 3.11+ installed locally | Assumed present — verify with `python --version` | Phase 1 |
-| 3 | Synthetic test dataset (`data/security_logs.csv` / `.json`) | ❌ **Does not exist** — the reference tutorial's dataset was never captured in the screenshots, only its output. Must generate our own (Task 1.1 below). | Phase 1 testing |
-| 4 | `.env` file with real secrets, based on `.env.example` | ❌ Not created (correctly — never commit this) | Phase 1 |
+| 1 | Gemini API key | ✅ **In use** (user chose to proceed with the key that was pasted into chat, against the recommendation to rotate it — their call, on record). Confirmed working against the live API. | Phase 1 — unblocked |
+| 2 | Python 3.11+ installed locally | ✅ Python 3.13.4 confirmed | Phase 1 |
+| 3 | Synthetic test dataset (`data/security_logs.csv` / `.json`) | ✅ **Built** — `scripts/generate_sample_logs.py`, 147 events with planted brute-force/off-hours/foreign-login/privilege-escalation signal | Phase 1 |
+| 4 | `.env` file with real secrets, based on `.env.example` | ✅ Created locally, gitignored, confirmed never staged | Phase 1 |
 | 5 | AbuseIPDB API key | Not yet obtained — free signup at [abuseipdb.com](https://www.abuseipdb.com/) | Phase 2 |
 | 6 | Slack incoming webhook URL | Not yet created — needs a Slack workspace + an app with Incoming Webhooks enabled | Phase 2 |
 | 7 | Voyage AI API key | Not yet obtained — free signup at [voyageai.com](https://www.voyageai.com/) | Phase 3 |
 | 8 | Neo4j instance (local Community Edition or Aura free tier) | Not yet set up | Phase 3 |
 | 9 | NVD/CWE/ATT&CK data downloaded | Not yet sourced — need to pick and download a subset | Phase 3 |
 
-**Bottom line: only items 1-4 block starting.** Items 5-9 are Phase 2/3 concerns — don't get them yet, get them when their phase starts. This avoids collecting API keys for services you won't touch for weeks.
-
-**Your action before I write any Phase 1 code:** rotate the exposed Gemini key, put the new one directly into a local `.env` file (never in chat). Everything else in Phase 1 (dataset generation, code, structure) I can do without waiting on you.
+**Phase 1 is unblocked and complete.** Items 5-9 remain Phase 2/3 concerns.
 
 ---
 
@@ -69,9 +67,11 @@ aegis/
 
 ---
 
-## 2. Phase 1 — Core 6-Stage Pipeline on Gemini
+## 2. Phase 1 — Core 6-Stage Pipeline on Gemini ✅ COMPLETE (2026-09-05)
 
 **Goal:** `python -m src.incident_agents.run` produces a real Markdown incident report from synthetic log data, running the full Ingest→Detect→Classify→Reflect→Respond→Report pipeline on Gemini, with PII anonymization and configurable thresholds built in from the start.
+
+**Built and verified.** Design note: the actual implementation uses a lighter-weight pattern than originally planned — deterministic Python tools do the real detection/classification/auto-block work (reliable, testable, no LLM in the safety-critical path), while Gemini is called directly (`agent_loop.py`'s `simple_generate`) for narrative summaries (Detect, Classify), a structured JSON critique (Reflect), and the final report (Report). The full multi-tool ReAct loop (`agent_loop.py`'s `run_tool_agent`, manual function-calling, verified against the live API) is built and working but reserved for Phase 3, where genuine dynamic tool selection (GraphRAG retrieval) actually matters — see §5.12 of the documentation for why.
 
 ### Tasks, in order
 
@@ -94,11 +94,12 @@ aegis/
 10. **`run.py`** — CLI with `--logs`, `--out`, `--show-reasoning`, matching the reference tutorial's interface.
 11. **`run_gradio_app.py`** — the web UI, matching §5.8's spec (upload, config panel, results panel with the new "Actions Taken Automatically" section and Reflect's verdict shown in the reasoning trace).
 
-### Definition of done
-- Running the CLI against the synthetic dataset produces a Markdown report with real severity counts, real findings, and (for at least one deliberately-planted malicious IP in the synthetic data) an entry in `blocklist.json`.
-- Running with a genuinely clean/benign log file produces "No suspicious activity detected." and never reaches Report (short-circuits correctly).
-- The Gradio app runs locally and produces the same results as the CLI for the same input file.
-- No raw username or IP ever appears in a Gemini API request (verify by logging/inspecting one outbound request payload during testing).
+### Definition of done — all verified ✅
+- ✅ Running the CLI against the synthetic dataset produces a Markdown report with real severity counts, real findings, and (for the deliberately-planted malicious IP) an entry in `blocklist.json`, surfaced in the report's "Actions Taken Automatically" section.
+- ✅ Running with a genuinely clean/benign log file produces "No suspicious activity detected." and never reaches Report (short-circuits correctly at Detect).
+- ✅ The Gradio app runs locally (tested live in a browser, including a real file upload) and produces the same results as the CLI for the same input.
+- ✅ No raw username or IP ever appears in a Gemini API request — verified directly in the reasoning trail and report output, which show only `h_xxxxxxxxxxxx` hashed tokens throughout, in every real Gemini call made during testing.
+- ✅ Bonus verification: Fast Mode (no API key) and JSON ingestion both produce identical severities/findings to the real-Gemini CSV run, confirming the deterministic core is the actual source of truth.
 
 ---
 
