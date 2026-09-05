@@ -12,8 +12,8 @@ This is the execution plan. For *why* each decision was made, see [PROJECT_DOCUM
 | 2 | Python 3.11+ installed locally | ✅ Python 3.13.4 confirmed | Phase 1 |
 | 3 | Synthetic test dataset (`data/security_logs.csv` / `.json`) | ✅ **Built** — `scripts/generate_sample_logs.py`, 147 events with planted brute-force/off-hours/foreign-login/privilege-escalation signal | Phase 1 |
 | 4 | `.env` file with real secrets, based on `.env.example` | ✅ Created locally, gitignored, confirmed never staged | Phase 1 |
-| 5 | AbuseIPDB API key | ⏳ Code ready — user obtaining key themselves at [abuseipdb.com](https://www.abuseipdb.com/), add to `.env`'s `ABUSEIPDB_API_KEY` when ready | Phase 2 — live verification only |
-| 6 | Slack incoming webhook URL | ⏳ Code ready — user setting up themselves (Slack workspace + app with Incoming Webhooks), add to `.env`'s `SLACK_WEBHOOK_URL` when ready | Phase 2 — live verification only |
+| 5 | AbuseIPDB API key | ✅ **Added and verified live** — real API call confirmed working | Phase 2 — done |
+| 6 | Slack incoming webhook URL | ✅ **Added and verified live** — real alert confirmed posted | Phase 2 — done |
 | 7 | Voyage AI API key | Not yet obtained — free signup at [voyageai.com](https://www.voyageai.com/) | Phase 3 |
 | 8 | Neo4j instance (local Community Edition or Aura free tier) | Not yet set up | Phase 3 |
 | 9 | NVD/CWE/ATT&CK data downloaded | Not yet sourced — need to pick and download a subset | Phase 3 |
@@ -103,7 +103,7 @@ aegis/
 
 ---
 
-## 3. Phase 2 — Real Integrations ✅ CODE COMPLETE (2026-09-05), live verification pending your credentials
+## 3. Phase 2 — Real Integrations ✅ COMPLETE AND VERIFIED LIVE (2026-09-05)
 
 **Goal:** Detect's threat lookups use real AbuseIPDB data; a Slack channel gets notified on High-severity findings.
 
@@ -116,7 +116,7 @@ aegis/
 ### Definition of done
 - ✅ Fallback paths verified: no AbuseIPDB key → `"Unknown"` reputation, no crash; no Slack webhook → `slack_notified: false`, no crash.
 - ✅ The synthetic dataset's planted attacker IP still triggers auto-block correctly under the new real-API code path (via a documented demo override — see PROJECT_DOCUMENTATION.md §5.13 — since its RFC 5737 test-net address would otherwise show as harmless to any real threat-intel API).
-- ⏳ **Pending your credentials:** a real known-bad IP producing a real, non-mocked risk score; a real Slack message actually landing in your channel. No code changes needed once you add `ABUSEIPDB_API_KEY` / `SLACK_WEBHOOK_URL` to `.env` — just run the CLI again.
+- ✅ **Verified live:** a real IP (`8.8.8.8`) produced a real, non-mocked AbuseIPDB response (`total_reports: 200`, a real current timestamp) — confirmed this is genuine API data, not the fallback shape. A real pipeline run posted successfully to the configured Slack webhook.
 
 ---
 

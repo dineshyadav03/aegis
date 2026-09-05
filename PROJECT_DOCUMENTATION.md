@@ -268,7 +268,7 @@ Phase 1 is now built and verified end-to-end (CLI and Gradio UI both tested agai
 
 **Slack alerting built** (`tools/alerting.py`): posts a short summary (not the full report) to an Incoming Webhook on any High-severity finding; best-effort, `slack_notified` state field records whether it actually sent.
 
-**Status:** code complete and verified via all fallback paths (no-key, rate-limit-shaped errors, no-webhook). Full live verification against real AbuseIPDB/Slack pending the user adding real credentials to their local `.env` (their choice, §6) — nothing in the code needs to change when they do, per the standard "no key → fallback, key present → real call" pattern already established for Gemini.
+**Status: fully verified live** (2026-09-05). AbuseIPDB confirmed with a real API call (`8.8.8.8` → `total_reports: 200`, a real current timestamp, `threat_type: "Content Delivery Network"` — unmistakably live data, not the fallback shape). Slack confirmed — a real run posted successfully to the configured webhook (`Report: Slack alert sent.`). Both credentials added by the user themselves per §6, no code changes needed once added.
 
 ---
 
@@ -367,7 +367,7 @@ Taken together, this makes Aegis a stronger portfolio piece than any one of thos
 | **Autonomy model** | Decision-support by default; one narrowly bounded exception (auto-block a confirmed-malicious IP to a local blocklist file) — everything else always waits for a human. |
 | **Scope vs. reference tutorial** | Deliberately much larger: real AbuseIPDB threat-intel, real persistent cross-run memory, CSV+JSON ingestion, PII anonymization, configurable detection thresholds, Slack alerting, a full GraphRAG/Neo4j layer, a reflection loop, one bounded autonomous action, and Gemini instead of OpenAI. |
 | **Scope vs. original concept slide** | Now matches on all four architectural boxes (§7a) — the two gaps found on 2026-09-05 (missing reflection, missing response orchestration) are both resolved. |
-| **Status** | **Phase 1 complete and verified.** **Phase 2 code complete** (real AbuseIPDB + Slack, §5.13) — verified via all fallback paths; full live verification pending the user adding real API credentials to `.env` (their choice to obtain these themselves, no code changes needed once added). Next: Phase 3 (GraphRAG). |
+| **Status** | **Phase 1 and Phase 2 both complete and fully verified live** (2026-09-05) — real Gemini, real AbuseIPDB, real Slack all confirmed working end-to-end. Next: Phase 3 (GraphRAG). |
 
 ---
 
