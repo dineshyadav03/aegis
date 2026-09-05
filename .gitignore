@@ -26,6 +26,8 @@ neo4j_data/
 # Persistent runtime state (Phase 4) — local, not source
 data/*.sqlite
 data/*.sqlite3
+data/*.sqlite-shm
+data/*.sqlite-wal
 
 # IDE
 .vscode/

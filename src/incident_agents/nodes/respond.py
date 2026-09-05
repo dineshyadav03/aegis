@@ -20,11 +20,11 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..config import get_thresholds
+from ..config import get_blocklist_path, get_thresholds
 from ..memory import record_finding
 from ..state import AgentState
 
-BLOCKLIST_PATH = Path("blocklist.json")
+BLOCKLIST_PATH = Path(get_blocklist_path())
 
 
 def _load_blocklist() -> list[dict]:

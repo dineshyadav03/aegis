@@ -5,11 +5,20 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from dotenv import load_dotenv
 from google import genai
 
 load_dotenv()
+
+# Anchor default data paths to the project root, not the process's current
+# working directory — a real bug found while testing the Gradio app: it can
+# be launched from a different CWD than the CLI, and a bare relative path
+# ("data/checkpoints.sqlite") silently resolved to the wrong location and
+# failed with "unable to open database file". Absolute paths fix this for
+# every caller, CLI or Gradio, regardless of launch directory.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # We use manual (non-automatic) function calling throughout — see agent_loop.py
 # — so the SDK's "use Chat.send_message instead" nudge doesn't apply here.
@@ -113,15 +122,21 @@ def get_thresholds() -> Thresholds:
 
 
 def get_data_path() -> str:
-    return os.environ.get("AEGIS_DATA_PATH", "data/security_logs.csv")
+    return os.environ.get("AEGIS_DATA_PATH", str(PROJECT_ROOT / "data" / "security_logs.csv"))
 
 
 def get_checkpoint_db_path() -> str:
-    return os.environ.get("AEGIS_CHECKPOINT_DB_PATH", "data/checkpoints.sqlite")
+    path = os.environ.get("AEGIS_CHECKPOINT_DB_PATH", str(PROJECT_ROOT / "data" / "checkpoints.sqlite"))
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def get_history_db_path() -> str:
-    return os.environ.get("AEGIS_HISTORY_DB_PATH", "data/investigation_history.sqlite")
+    return os.environ.get("AEGIS_HISTORY_DB_PATH", str(PROJECT_ROOT / "data" / "investigation_history.sqlite"))
+
+
+def get_blocklist_path() -> str:
+    return os.environ.get("AEGIS_BLOCKLIST_PATH", str(PROJECT_ROOT / "blocklist.json"))
 
 
 RECURRING_MIN_TIMES_FLAGGED = 3
