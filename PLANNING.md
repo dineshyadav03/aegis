@@ -8,7 +8,7 @@ This is the execution plan. For *why* each decision was made, see [PROJECT_DOCUM
 
 | # | Item | Status | Blocks |
 |---|---|---|---|
-| 1 | Anthropic API key | ❌ **Not yet obtained** — get one at [console.anthropic.com](https://console.anthropic.com) | Phase 1 (everything) |
+| 1 | Gemini API key | ⚠️ **Obtained, but was pasted into chat — must be rotated.** Revoke the exposed key in Google AI Studio, generate a fresh one, and put it directly into `.env` yourself (don't paste it into chat again). | Phase 1 (everything) |
 | 2 | Python 3.11+ installed locally | Assumed present — verify with `python --version` | Phase 1 |
 | 3 | Synthetic test dataset (`data/security_logs.csv` / `.json`) | ❌ **Does not exist** — the reference tutorial's dataset was never captured in the screenshots, only its output. Must generate our own (Task 1.1 below). | Phase 1 testing |
 | 4 | `.env` file with real secrets, based on `.env.example` | ❌ Not created (correctly — never commit this) | Phase 1 |
@@ -20,7 +20,7 @@ This is the execution plan. For *why* each decision was made, see [PROJECT_DOCUM
 
 **Bottom line: only items 1-4 block starting.** Items 5-9 are Phase 2/3 concerns — don't get them yet, get them when their phase starts. This avoids collecting API keys for services you won't touch for weeks.
 
-**Your action before I write any Phase 1 code:** get an Anthropic API key and have it ready to paste into `.env`. Everything else in Phase 1 (dataset generation, code, structure) I can do without waiting on you.
+**Your action before I write any Phase 1 code:** rotate the exposed Gemini key, put the new one directly into a local `.env` file (never in chat). Everything else in Phase 1 (dataset generation, code, structure) I can do without waiting on you.
 
 ---
 
@@ -69,26 +69,26 @@ aegis/
 
 ---
 
-## 2. Phase 1 — Core 6-Stage Pipeline on Claude
+## 2. Phase 1 — Core 6-Stage Pipeline on Gemini
 
-**Goal:** `python -m src.incident_agents.run` produces a real Markdown incident report from synthetic log data, running the full Ingest→Detect→Classify→Reflect→Respond→Report pipeline on Claude, with PII anonymization and configurable thresholds built in from the start.
+**Goal:** `python -m src.incident_agents.run` produces a real Markdown incident report from synthetic log data, running the full Ingest→Detect→Classify→Reflect→Respond→Report pipeline on Gemini, with PII anonymization and configurable thresholds built in from the start.
 
 ### Tasks, in order
 
 1. **Environment setup**
    - `python -m venv .venv`, activate it, `pip install -r requirements.txt`
-   - Copy `.env.example` → `.env`, fill in `ANTHROPIC_API_KEY`
+   - Copy `.env.example` → `.env`, fill in `GEMINI_API_KEY` (the **rotated** key, never the one pasted earlier)
 2. **Synthetic dataset** (`scripts/generate_sample_logs.py`)
    - Generate ~150-200 synthetic events (matching the reference tutorial's scale) across event types: `login` (success/fail), `sudo`, `data_download`, with realistic timestamps, usernames, source IPs (including a few deliberately anomalous ones: brute-force clusters, off-hours large downloads, foreign-IP logins, a `sudo` burst) — so the pipeline has real signal to detect.
    - Output both `data/security_logs.csv` and `data/security_logs.json` (same data, both formats) to exercise both Ingest parsers.
 3. **`state.py`** — define `AgentState` (TypedDict): `log_path`, `events`, `anomalies`, `findings`, `reflection_retry_count`, `needs_reanalysis`, `autonomous_actions_taken`, `reasoning_trail`, `confidence_scores`.
-4. **`config.py`** — `get_llm()` (returns a configured Claude client), `get_anthropic_key()`, `get_model_name()` (default `claude-opus-5` per `.env`), `get_temperature()`, and a `Thresholds` object (brute-force count, off-hours cutoff hour, off-hours byte threshold, high-confidence cutoff for auto-block) — all overridable via `.env`, sensible defaults otherwise.
-5. **`anonymize.py`** — hash usernames/IPs at ingestion (e.g. salted SHA-256, truncated for readability), keep an in-memory reverse-lookup dict for the current run only (never persisted, never sent to the LLM) so the final report can still say "the same user across 3 findings" without ever sending the real username to Claude.
+4. **`config.py`** — `get_llm()` (returns a configured Gemini client), `get_gemini_key()`, `get_model_name()` (default a current Gemini model — verify the exact ID against [ai.google.dev](https://ai.google.dev/gemini-api/docs) at implementation time, since Gemini's model lineup moves fast; as of this plan, the Gemini 3.x family is current), `get_temperature()`, and a `Thresholds` object (brute-force count, off-hours cutoff hour, off-hours byte threshold, high-confidence cutoff for auto-block) — all overridable via `.env`, sensible defaults otherwise.
+5. **`anonymize.py`** — hash usernames/IPs at ingestion (e.g. salted SHA-256, truncated for readability), keep an in-memory reverse-lookup dict for the current run only (never persisted, never sent to the LLM) so the final report can still say "the same user across 3 findings" without ever sending the real username to Gemini.
 6. **Tools** (`tools/parsers.py`, `tools/detection.py`, `tools/classification.py`, `tools/threat_intel.py` mock version):
    - Port the reference tutorial's `pattern_detector_tool` and `anomaly_detector_tool` logic (brute force, privilege escalation, off-hours download, geographic anomaly — designing the geo-anomaly logic ourselves since it was never fully shown, per §5.11 of the documentation), with thresholds pulled from `config.py` instead of hardcoded.
    - `risk_assessor_tool`, `context_enricher_tool` — design fresh (never shown in source material, §5.11).
    - `threat_lookup_tool` — mock version for Phase 1 (real AbuseIPDB comes in Phase 2), matching the reference tutorial's interface so swapping it later is a one-file change.
-7. **Nodes** (`nodes/ingest.py` → `nodes/report.py`) — implement each per the spec in `PROJECT_DOCUMENTATION.md` §5.1-§5.6, using Claude's tool-use API (see the `claude-api` reference this session used) instead of the reference tutorial's OpenAI-based `create_react_agent` calls.
+7. **Nodes** (`nodes/ingest.py` → `nodes/report.py`) — implement each per the spec in `PROJECT_DOCUMENTATION.md` §5.1-§5.6, using the Gemini API's function-calling/tool-use format (verify current SDK usage against Google's official docs at implementation time — don't assume prior training knowledge, since the Gemini SDK surface has changed multiple times) instead of the reference tutorial's OpenAI-based `create_react_agent` calls.
 8. **`respond.py`** — the bounded auto-block: on a High-severity, high-confidence, IP-bearing finding, append to `blocklist.json` (gitignored) with timestamp + reason.
 9. **`graph.py`** — wire the `StateGraph` exactly as specified in §5.7 of the documentation, including the Reflect→Classify conditional loop (capped at `MAX_REFLECTION_RETRIES = 2`) and the `InMemorySaver` checkpointer (upgraded to a persistent store in Phase 4).
 10. **`run.py`** — CLI with `--logs`, `--out`, `--show-reasoning`, matching the reference tutorial's interface.
@@ -98,7 +98,7 @@ aegis/
 - Running the CLI against the synthetic dataset produces a Markdown report with real severity counts, real findings, and (for at least one deliberately-planted malicious IP in the synthetic data) an entry in `blocklist.json`.
 - Running with a genuinely clean/benign log file produces "No suspicious activity detected." and never reaches Report (short-circuits correctly).
 - The Gradio app runs locally and produces the same results as the CLI for the same input file.
-- No raw username or IP ever appears in a Claude API request (verify by logging/inspecting one outbound request payload during testing).
+- No raw username or IP ever appears in a Gemini API request (verify by logging/inspecting one outbound request payload during testing).
 
 ---
 
@@ -158,18 +158,19 @@ aegis/
 
 - **Per-tool unit tests** (Phase 1): each detection/classification tool gets a small pytest covering its rule logic against hand-crafted event lists (e.g. exactly 5 failed logins → brute force fires; 4 → it doesn't).
 - **End-to-end smoke test** (every phase): run the full CLI against the synthetic dataset and assert the report contains expected findings — this is the main regression check as phases get added.
-- **No LLM-output golden-file testing** — Claude's exact wording will vary run to run; test for *structural* correctness (severity counts add up, sections present, blocklist entries match High-severity IP findings) rather than exact text.
+- **No LLM-output golden-file testing** — Gemini's exact wording will vary run to run; test for *structural* correctness (severity counts add up, sections present, blocklist entries match High-severity IP findings) rather than exact text.
 - **Manual verification per phase** — the Definition of Done checklists above are pass/fail gates before moving to the next phase.
 
 ---
 
 ## 7. Answering "Are We Missing Anything Before Starting?"
 
-**Yes, four small things — none of them require a decision, just action:**
+**One real blocker, plus items already resolved:**
 
-1. **No Anthropic API key yet** — you said you need to get one. This is the only hard blocker; nothing in Phase 1 can run without it.
+1. **⚠️ The Gemini API key that was pasted into chat must be rotated before it's used anywhere.** Any credential that appears in a chat transcript should be treated as compromised — go revoke it in Google AI Studio, generate a new one, and put *only* the new one into your local `.env` (never paste a key into chat again, here or elsewhere). This is the one hard blocker; nothing in Phase 1 can safely run without a clean key.
 2. **No test data exists** — neither the original tutorial's dataset nor one of our own. Task 1.2 above (a synthetic log generator) resolves this, and I can build it without waiting on anything from you.
 3. **No repo scaffolding existed until this session** — now resolved: `.gitignore`, `.env.example`, `requirements.txt`, `LICENSE` (Apache 2.0), and the `data/`/`reports/` directories have been added and pushed.
 4. **No committed decision on secrets hygiene** — resolved by `.gitignore` explicitly excluding `.env*` (except `.env.example`) and `blocklist.json` — this matters more than usual since the repo is **public**.
+5. **LLM provider changed mid-plan** — this whole document was written for Claude and has now been updated for Gemini (§0, §2, §6). Gemini's exact model IDs and SDK usage should be double-checked against Google's current docs at actual implementation time rather than trusted from this plan verbatim, since Gemini's naming and API surface move quickly.
 
-**Nothing else blocks starting.** Once you have the Anthropic key, Phase 1 can begin immediately — I'll build the synthetic dataset generator and the pipeline code together so there's real data to test against from the first run.
+**Nothing else blocks starting.** Once a rotated Gemini key is sitting in your local `.env`, Phase 1 can begin immediately — I'll build the synthetic dataset generator and the pipeline code together so there's real data to test against from the first run.

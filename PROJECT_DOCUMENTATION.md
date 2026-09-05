@@ -88,7 +88,7 @@ WORKFLOW PIPELINE
                         then traverse relationships
 ```
 
-**Framework:** LangGraph (graph/state orchestration, including a real reflection loop — not just linear conditional routing) + Anthropic Claude (LLM backend, decided — see §6) + a **GraphRAG** layer (Voyage AI embeddings for entity matching + Neo4j knowledge graph for relationship traversal) for CVE-grounded threat classification. The reference tutorial's actual implementation used OpenAI directly, had no RAG, no reflection stage, and no autonomous action at all — every one of those is a deliberate departure made for Aegis (§6, §7a).
+**Framework:** LangGraph (graph/state orchestration, including a real reflection loop — not just linear conditional routing) + Google Gemini (LLM backend, decided — see §6) + a **GraphRAG** layer (Voyage AI embeddings for entity matching + Neo4j knowledge graph for relationship traversal) for CVE-grounded threat classification. The reference tutorial's actual implementation used OpenAI directly, had no RAG, no reflection stage, and no autonomous action at all — every one of those is a deliberate departure made for Aegis (§6, §7a).
 
 ---
 
@@ -147,7 +147,7 @@ This is the "Response Orchestration Agent (autonomous response)" from the origin
 - **Output:** an `autonomous_actions_taken` list on shared state, separate from `findings` — the Report agent surfaces these separately from human-facing recommendations.
 
 ### 5.6 Report Agent (`nodes/report.py`)
-- **Not a ReAct agent** — calls Claude directly for report generation (`_llm_report(findings)`), with a deterministic fallback (`_fallback_report(findings)`) when no API key is set, an LLM error occurs, or there are simply no findings (returns `"No suspicious activity detected."`).
+- **Not a ReAct agent** — calls Gemini directly for report generation (`_llm_report(findings)`), with a deterministic fallback (`_fallback_report(findings)`) when no API key is set, an LLM error occurs, or there are simply no findings (returns `"No suspicious activity detected."`).
 - **System prompt:** *"You are a security analyst. Write a succinct markdown incident report. Group similar findings, include counts, and list prioritized actions. Be precise and avoid fluff."*
 - **User payload:** the findings as a JSON list (with CVE/CWE/ATT&CK context from Classify, any Reflect concerns, and any autonomous actions already taken by Respond), plus explicit formatting instructions.
 - **Output:** a Markdown **Security Incident Report** with distinct sections:
@@ -198,7 +198,7 @@ return graph.compile(checkpointer=checkpointer)
 This preserves the reference tutorial's short-circuit behavior (nothing worth escalating → straight to `END`) while adding the reflection feedback loop and the bounded autonomous-response step that the original concept called for but the tutorial's actual code never built.
 
 ### 5.8 Runtime / Configuration
-- **Config surface:** Anthropic API key, Voyage AI API key, AbuseIPDB API key, Slack webhook URL, Neo4j connection details, selectable Claude model, temperature (default `0.0`, deterministic), detection thresholds (§6), dataset path.
+- **Config surface:** Gemini API key, Voyage AI API key, AbuseIPDB API key, Slack webhook URL, Neo4j connection details, selectable Gemini model, temperature (default `0.0`, deterministic), detection thresholds (§6), dataset path.
 - **CLI:**
   ```bash
   python -m src.incident_agents.run                                   # default data
@@ -215,7 +215,7 @@ This preserves the reference tutorial's short-circuit behavior (nothing worth es
 - Run A (`gpt-5-nano`, verbose): 150 events processed → 26 anomalies → report with **High: 20 / Medium: 1 / Low: 31**, dominated by `privilege_escalation` and `foreign_login` findings.
 - Run B (`gpt-4o-mini`, tighter formatting): 150 events → 6 anomalies → **High: 6 / Medium: 0 / Low: 0**, findings: `brute_force_login` (x2), `privilege_escalation` (x4); confidence scores `ai_report: 0.92`, `detection: 0.88`, `classification: 0.85`; processing time ~00:01:03.
 
-This shows the same pipeline producing materially different output volume/severity distribution depending on model choice — we'll want to re-baseline this once Aegis is running on Claude instead of OpenAI.
+This shows the same pipeline producing materially different output volume/severity distribution depending on model choice — we'll want to re-baseline this once Aegis is running on Gemini instead of OpenAI.
 
 ### 5.10 GraphRAG Layer — CVE/CWE/ATT&CK Knowledge Retrieval (new, not in the reference tutorial)
 
@@ -224,7 +224,7 @@ The reference tutorial's actual code has **no RAG** — but the original concept
 - **What it retrieves:** relevant CVE (Common Vulnerabilities and Exposures) entries, their associated CWE (Common Weakness Enumeration) categories, and mapped MITRE ATT&CK techniques — matched against the patterns/anomalies the Detect agent finds. E.g. a detected `privilege_escalation` pattern doesn't just get "similar-sounding" CVEs back — it gets the actual graph neighborhood: the CWE category for privilege escalation, every CVE under that CWE, and the ATT&CK techniques those CVEs map to.
 - **Knowledge graph structure:** nodes for `CVE`, `CWE`, and `ATT&CK Technique`; edges like `CVE -[HAS_WEAKNESS]-> CWE` and `CWE -[MAPS_TO]-> ATT&CK Technique`, plus `CVE -[RELATED_TO]-> CVE` where applicable.
 - **Graph store:** **Neo4j** — a real graph database (Community Edition or Aura free tier), queried via Cypher.
-- **Embedding provider:** **Voyage AI** — Claude has no native embeddings endpoint, so this is a separate API call in the pipeline. Used for the "entry point" half of retrieval (see below), not for the graph itself.
+- **Embedding provider:** **Voyage AI** — kept as a dedicated embeddings provider even though Gemini has its own native embeddings API (`gemini-embedding-2`), so this is a separate API call in the pipeline. Deliberately decoupling embeddings from the LLM provider (§6) rather than defaulting to Gemini's own embeddings. Used for the "entry point" half of retrieval (see below), not for the graph itself.
 - **Retrieval strategy — hybrid:** (1) embed the finding's description via Voyage AI and use vector similarity to find the most relevant starting CVE/CWE node(s), then (2) traverse the graph from those nodes via Cypher to pull in directly related CWEs, ATT&CK techniques, and neighboring CVEs. This is the standard GraphRAG pattern — vector search for the entry point, graph traversal for the surrounding context vector similarity alone would miss.
 - **CVE/CWE/ATT&CK data source:** a **static downloaded subset of the NVD (National Vulnerability Database) feed** plus the CWE and ATT&CK mapping data, loaded into Neo4j once at setup time — not a live API call per run.
 - **Where it plugs in:** as an additional tool available to the Classify agent (`cve_graph_retrieval_tool`) — it takes a finding's pattern/description, runs the hybrid retrieval above, and folds the resulting graph context into the risk assessment before severity is assigned.
@@ -255,11 +255,11 @@ A careful pass through every screenshot — not just the ones summarized above �
 
 | Question | Decision | Implication |
 |---|---|---|
-| LLM provider | **Anthropic Claude** (not OpenAI, not Groq) | All agent prompts/tool-calling target Claude's API and tool-use format. Different provider from every other project in this repo (Simple RAG / Agentic RAG use Groq) — no existing config code to reuse. |
+| LLM provider | **Google Gemini** (not Claude, not OpenAI, not Groq) — *changed 2026-09-05, superseding an earlier Claude decision* | All agent prompts/tool-calling target the Gemini API's tool-use format. A third provider distinct from every other project in this repo (Simple RAG / Agentic RAG use Groq) — no existing config code to reuse. Current model family as of this decision: Gemini 3.x (e.g. `gemini-3.7-flash` as a cost-effective workhorse, `gemini-3.1-pro` for heavier reasoning) — verify current model IDs against Google's docs at implementation time, since Gemini's naming has moved fast. |
 | Threat intelligence | **Real free API — AbuseIPDB** instead of the tutorial's mocked lookup | Needs a real AbuseIPDB API key (free tier: 1,000 checks/day) and real network calls with rate-limit/error handling. |
 | Cross-run memory | **Real learning**, not just a wired-but-unused checkpointer | Needs a persistent store (e.g. SQLite/file-backed) so investigation history and learned patterns actually survive between runs. Deferred to Phase 4. |
 | Log formats | **CSV + JSON** for v1 | Ingest agent needs two parsers (or one normalizing parser) from day one. |
-| PII handling | **Anonymize/hash before sending to Claude** | Usernames and IPs hashed/masked at ingestion, with a local-only reverse-lookup mapping so the final report can still reference "the same user/IP" across findings without exposing raw values to any external API. |
+| PII handling | **Anonymize/hash before sending to Gemini** | Usernames and IPs hashed/masked at ingestion, with a local-only reverse-lookup mapping so the final report can still reference "the same user/IP" across findings without exposing raw values to any external API. |
 | Detection thresholds | **Configurable from the start** | Thresholds (failed-login count, off-hours download size/time window, etc.) live in config, not hardcoded. |
 | Downstream alerting | **Slack webhook notification** on High-severity findings | Needs a Slack incoming webhook URL. |
 | Threat-intel API | **AbuseIPDB** | Free tier, purpose-built for IP abuse/reputation scoring. |
@@ -267,18 +267,18 @@ A careful pass through every screenshot — not just the ones summarized above �
 | RAG type | **GraphRAG**, not plain vector RAG | CVE/CWE/ATT&CK data is inherently relational — a knowledge graph preserves that structure. |
 | Graph store | **Neo4j** | Real graph database queried via Cypher (free Community Edition / Aura tier). |
 | Retrieval strategy | **Hybrid: Voyage AI vector search for entry-point nodes, then Cypher graph traversal** | Standard GraphRAG pattern. |
-| Embedding provider | **Voyage AI** | Claude has no native embeddings endpoint. |
+| Embedding provider | **Voyage AI** (kept, re-confirmed 2026-09-05 after switching to Gemini) | Gemini *does* have a native embeddings API (`gemini-embedding-2`) — unlike Claude, so the original "no native embeddings" justification no longer applies. Deliberately kept Voyage AI anyway to decouple embeddings from the LLM provider, so either can be swapped independently later. |
 | CVE/CWE/ATT&CK data source | **Static downloaded NVD + CWE + ATT&CK subset** | Loaded into Neo4j once at setup; no live dependency during runs. |
 | **Reflection stage** | **Yes — add a Reflect agent** between Classify and Respond | Closes gap #1 against the original concept (§7a): findings now get reviewed/critiqued before anything acts on them, with a capped loop back to Classify for re-analysis if something looks unjustified. |
 | **Autonomous response** | **Yes — but narrowly bounded**, not the original concept's fully autonomous orchestration | Closes gap #2 against the original concept (§7a): the *only* autonomous action is auto-blocking a confirmed-malicious IP (High severity + high confidence). Every other action (password resets, system isolation, access reviews) stays a human-executed recommendation. |
 | Auto-block mechanism | **Write to a local blocklist file** (`blocklist.json`), not a real firewall API call | No real corporate firewall exists to integrate with in this project; a local file demonstrates the capability honestly. A real deployment would swap this for an actual firewall/WAF API. |
 | Repo license | **Apache 2.0** | Matches the license already used elsewhere across this developer's repos; includes an explicit patent grant. |
 | Package/dependency manager | **pip + venv** | Simplest, most universally familiar; matches the reference tutorial's own setup style. |
-| Anthropic API key | **Not yet obtained — first blocking task for Phase 1** | Nothing in Phase 1 can actually run against a real model until this exists; see [PLANNING.md](./PLANNING.md) §0. |
+| Gemini API key | **Obtained by the user 2026-09-05** — ⚠️ **the key value was pasted into this chat and must be rotated before use.** A fresh key (never pasted anywhere) should be placed directly into the local `.env` file. | Once a rotated key exists in `.env`, nothing blocks starting Phase 1. |
 
 **Net effect:** Aegis is intentionally scoped *beyond* both the reference tutorial (which had 4 linear agents, no RAG, no reflection, no autonomous action) and — in the RAG and reflection dimensions — matches or exceeds the *original* concept slide too. Suggested build order:
 
-1. **Phase 1 — core 6-stage pipeline on Claude:** Ingest (CSV+JSON) → Detect → Classify → Reflect → Respond (bounded auto-block only) → Report, with configurable thresholds, PII anonymization, and the reflection loop built in from the start.
+1. **Phase 1 — core 6-stage pipeline on Gemini:** Ingest (CSV+JSON) → Detect → Classify → Reflect → Respond (bounded auto-block only) → Report, with configurable thresholds, PII anonymization, and the reflection loop built in from the start.
 2. **Phase 2 — real integrations:** swap in the real AbuseIPDB lookup, add the Slack webhook notification step.
 3. **Phase 3 — GraphRAG layer:** stand up Neo4j, load the CVE/CWE/ATT&CK subset and relationships, embed entry-point text via Voyage AI, wire hybrid retrieval into Classify.
 4. **Phase 4 — memory:** add the persistent cross-run learning store once everything else is solid.
@@ -289,7 +289,7 @@ Happy to sequence it differently if you'd rather.
 
 ## 7. Still Open (implementation details, no user input needed — will design as we build)
 
-- **`state.py` / `config.py` schemas** — will design `AgentState` fields and config accessors ourselves, adapted for Claude.
+- **`state.py` / `config.py` schemas** — will design `AgentState` fields and config accessors ourselves, adapted for Gemini.
 - **Persistent memory store choice** (SQLite vs. flat file) — Phase 4.
 - **Anonymization scheme details** (hash algorithm, local reverse-lookup table design) — Phase 1.
 - **Size/scope of the CVE/CWE/ATT&CK subset** — Phase 3.
@@ -322,7 +322,7 @@ Aegis sits at the intersection of three overlapping domains, plus one thing beyo
 
 | Domain | Where it shows up in Aegis |
 |---|---|
-| **AI Engineering** | Real API integration across five external services (Claude, Voyage AI, AbuseIPDB, Slack, Neo4j); config/secrets management; structured output parsing (severity levels, confidence scores); graceful degradation (rule-based "Fast Mode" when no LLM key is present); PII-safe data handling (anonymize before any log content reaches an external API); two working interfaces (CLI + Gradio web app). |
+| **AI Engineering** | Real API integration across five external services (Gemini, Voyage AI, AbuseIPDB, Slack, Neo4j); config/secrets management; structured output parsing (severity levels, confidence scores); graceful degradation (rule-based "Fast Mode" when no LLM key is present); PII-safe data handling (anonymize before any log content reaches an external API); two working interfaces (CLI + Gradio web app). |
 | **Agentic AI** | Six autonomous agents (Ingest, Detect, Classify, Reflect, Respond, Report), each reasoning over its own scoped toolset; orchestrated as a LangGraph state machine with **conditional routing** (short-circuits to `END` when nothing's worth escalating) *and* a **reflection feedback loop** (Reflect can send work back to Classify) *and* **one narrowly bounded autonomous action** (Respond auto-blocks confirmed-malicious IPs) — a materially more sophisticated agentic design than a single-pass pipeline. |
 | **RAG — specifically GraphRAG** | A knowledge-graph-backed retrieval pipeline, not just flat vector search: CVE/CWE/ATT&CK relationships modeled as a **Neo4j graph**, with **hybrid retrieval** (Voyage AI embeddings to find entry-point nodes, then Cypher graph traversal for related context) injected into the Classify agent's risk assessment. A step up in sophistication from this repo's Simple RAG and Agentic RAG projects, which use flat vector retrieval. |
 | **Multi-agent orchestration + persistent memory** (beyond basic agentic AI) | Cross-run investigation history and learned patterns intended to persist between sessions (Phase 4) — not just a single-session agent loop, but a system meant to get better at recognizing recurring threats over time. |
@@ -339,12 +339,12 @@ Taken together, this makes Aegis a stronger portfolio piece than any one of thos
 | **Solution** | A 6-stage multi-agent pipeline (Ingest → Detect → Classify → Reflect → Respond → Report) built on LangGraph. Classify retrieves CVE/CWE/ATT&CK context via GraphRAG; Reflect reviews findings and can loop back for re-analysis; Respond auto-blocks confirmed-malicious IPs (the only autonomous action) while everything else becomes a human-facing recommendation in the final Markdown incident report — plus a Slack notification on High-severity findings. |
 | **Interfaces** | CLI (`python -m src.incident_agents.run`) and a Gradio web app (`localhost:7860`). |
 | **Fallback mode** | Rule-based detection only (no LLM) when no API key is configured, or via an explicit "Fast Mode" toggle. |
-| **LLM provider** | Anthropic Claude (decided) — a departure from the tutorial's OpenAI implementation and from this repo's existing Groq-based projects. |
-| **RAG stack** | **GraphRAG**: Neo4j knowledge graph (CVE→CWE→ATT&CK relationships) + Voyage AI embeddings for hybrid entry-point/traversal retrieval, over a static downloaded NVD/CWE/ATT&CK subset. |
+| **LLM provider** | Google Gemini (decided 2026-09-05, superseding an earlier Claude decision) — a departure from the tutorial's OpenAI implementation and from this repo's existing Groq-based projects. |
+| **RAG stack** | **GraphRAG**: Neo4j knowledge graph (CVE→CWE→ATT&CK relationships) + Voyage AI embeddings for hybrid entry-point/traversal retrieval, over a static downloaded NVD/CWE/ATT&CK subset. Voyage AI kept deliberately even though Gemini has native embeddings, to decouple the embedding provider from the LLM provider. |
 | **Autonomy model** | Decision-support by default; one narrowly bounded exception (auto-block a confirmed-malicious IP to a local blocklist file) — everything else always waits for a human. |
-| **Scope vs. reference tutorial** | Deliberately much larger: real AbuseIPDB threat-intel, real persistent cross-run memory, CSV+JSON ingestion, PII anonymization, configurable detection thresholds, Slack alerting, a full GraphRAG/Neo4j layer, a reflection loop, one bounded autonomous action, and Claude instead of OpenAI. |
+| **Scope vs. reference tutorial** | Deliberately much larger: real AbuseIPDB threat-intel, real persistent cross-run memory, CSV+JSON ingestion, PII anonymization, configurable detection thresholds, Slack alerting, a full GraphRAG/Neo4j layer, a reflection loop, one bounded autonomous action, and Gemini instead of OpenAI. |
 | **Scope vs. original concept slide** | Now matches on all four architectural boxes (§7a) — the two gaps found on 2026-09-05 (missing reflection, missing response orchestration) are both resolved. |
-| **Status** | Reference design fully understood; all scope decisions made (§6); both concept gaps closed (§7a); repo scaffolded (LICENSE, `.gitignore`, `requirements.txt`, `.env.example`) and linked to a GitHub Project board. **No pipeline code exists yet** — blocked only on obtaining an Anthropic API key (see [PLANNING.md](./PLANNING.md) §0). Next step: Phase 1 implementation. |
+| **Status** | Reference design fully understood; all scope decisions made (§6); both concept gaps closed (§7a); repo scaffolded (LICENSE, `.gitignore`, `requirements.txt`, `.env.example`) and linked to a GitHub Project board. A Gemini API key exists but **was exposed in chat and must be rotated** before use (see §6). **No pipeline code exists yet.** Next step: Phase 1 implementation once a rotated key is in `.env`. |
 
 ---
 

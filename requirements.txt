@@ -1,6 +1,6 @@
 # Phase 1 — core pipeline (install these to start)
 langgraph>=0.2
-anthropic>=0.40
+google-genai>=1.0          # official Gemini SDK (google-generativeai is deprecated — do not use it)
 pandas>=2.0
 python-dotenv>=1.0
 gradio>=4.0
