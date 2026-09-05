@@ -50,20 +50,21 @@ python run_gradio_app.py
 
 ## Architecture
 
-```
-[INGEST] → [DETECT] → [CLASSIFY] → [REFLECT] → [RESPOND] → [REPORT]
-   |           |           |            |            |          |
- parse      rule-based   risk +      LLM review,   auto-block  Markdown
- CSV/JSON   patterns +   GraphRAG    can loop       confirmed   report +
-            real         + history   back to        malicious   Slack
-            AbuseIPDB    escalation  Classify        IP only     alert
-            lookup                   (capped)
-                            |
-                            ▼
-                 [Neo4j knowledge graph]
-            CVE →HAS_WEAKNESS→ CWE →RELATED_TO→ CAPEC →MAPS_TO→ AttackTechnique
-             Voyage AI embeddings find entry-point nodes,
-                   Cypher traversal pulls in context
+This is the actual `StateGraph` wired in [`graph.py`](./src/incident_agents/graph.py) — not a simplified sketch. The two loops that matter: Reflect can send work back to Classify (capped retries), and both Detect and Respond can short-circuit straight to done when there's nothing worth escalating.
+
+```mermaid
+flowchart TD
+    Start([Start]) --> Ingest["Ingest<br/>parse CSV / JSON"]
+    Ingest --> Detect["Detect<br/>rule-based patterns +<br/>real AbuseIPDB lookup"]
+    Detect -- anomalies found --> Classify["Classify<br/>severity + GraphRAG +<br/>history escalation"]
+    Detect -- nothing suspicious --> Stop1(["Done — nothing to report"])
+    Classify --> Reflect["Reflect<br/>LLM review of Classify's work"]
+    Reflect -- "looks unjustified (capped retries)" --> Classify
+    Reflect -- approved --> Respond["Respond<br/>auto-block confirmed-malicious IP"]
+    Respond -- High/Medium findings --> Report["Report<br/>Markdown report + Slack alert"]
+    Respond -- nothing above Low --> Stop2(["Done — no report needed"])
+    Report --> Stop3(["Done"])
+    Classify -.queries.-> Graph[("Neo4j knowledge graph<br/>CVE → CWE → CAPEC → ATT&CK<br/>(Voyage AI embeddings find entry points)")]
 ```
 
 ## Stack
