@@ -84,7 +84,7 @@ Every "✅ live" above means confirmed against the real external service during 
 
 - **[PROJECT_DOCUMENTATION.md](./PROJECT_DOCUMENTATION.md)** — the full story: architecture, every scope decision and why, and a Build Notes section per phase documenting what was actually discovered while building it (API quirks, real infrastructure gotchas, bugs caught by live testing).
 - **[PLANNING.md](./PLANNING.md)** — the phase-by-phase task breakdown and Definition of Done checklists.
-- [Project board](https://github.com/users/dineshyadav03/projects/1) — all four phases tracked, all marked Done.
+- [Project board](https://github.com/users/dineshyadav03/projects/1) — all five phases tracked, all marked Done.
 
 ## Testing
 
