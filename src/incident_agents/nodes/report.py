@@ -21,7 +21,9 @@ _SYSTEM_PROMPT = (
     "You are a security analyst. Write a succinct Markdown incident report. "
     "Structure it as:\n"
     "## Summary\n(counts by severity)\n"
-    "## Findings by Severity\n(group High/Medium/Low, one bullet per finding)\n"
+    "## Findings by Severity\n(group High/Medium/Low, one bullet per finding — if a "
+    "finding has graph_context.matches, cite the top match's CVE ID, CVSS score, "
+    "and any ATT&CK technique IDs it maps to)\n"
     "## Actions Taken Automatically\n(list any auto-blocked IPs; write 'None' if empty)\n"
     "## Recommended Actions For You\nsplit into Immediate and Urgent\n\n"
     "Be precise and avoid fluff. User/IP identifiers are hashed tokens — refer "
@@ -52,6 +54,13 @@ def _fallback_report(findings: list[dict], autonomous_actions: list[dict]) -> st
         for f in items:
             kind = f.get("pattern") or f.get("anomaly")
             lines.append(f"- **{kind}** — user: {f.get('user')}, ip: {f.get('ip')}")
+            graph_context = f.get("graph_context") or {}
+            for match in graph_context.get("matches", [])[:1]:  # cite the top match only
+                cve_line = f"  - Related: {match['cve_id']} (CVSS {match.get('cvss_score', '?')})"
+                for a in match.get("attack_context", [])[:2]:
+                    if a.get("attack_id"):
+                        cve_line += f" → ATT&CK {a['attack_id']} ({a.get('attack_name', '')})"
+                lines.append(cve_line)
 
     lines += ["", "## Actions Taken Automatically"]
     if autonomous_actions:

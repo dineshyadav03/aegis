@@ -8,8 +8,8 @@ gradio>=4.0
 # Phase 2 — real integrations
 requests>=2.31          # AbuseIPDB lookups + Slack webhook posts
 
-# Phase 3 — GraphRAG (uncomment when Phase 3 starts)
-# neo4j>=5.20             # graph store driver
-# voyageai>=0.2           # embeddings for hybrid retrieval
+# Phase 3 — GraphRAG
+neo4j>=5.20             # graph store driver
+voyageai>=0.2           # embeddings for hybrid retrieval
 
 # Phase 4 — persistent memory: sqlite3 is Python stdlib, no extra dependency needed

@@ -4,9 +4,11 @@ Severity assignment is deterministic (tools/classification.py) for
 consistency; Gemini adds a short rationale narrative per run, used in the
 reasoning trail — it does not get to override severity in Phase 1.
 
-Phase 3 will add a GraphRAG tool here (cve_graph_retrieval_tool) so severity
-assignment can be genuinely informed by retrieved CVE/CWE/ATT&CK context —
-see PROJECT_DOCUMENTATION.md §5.10.
+Phase 3 (GraphRAG, PROJECT_DOCUMENTATION.md §5.10): each item's retrieved
+CVE/CWE/ATT&CK context can escalate severity by one level when a similar,
+high-CVSS real-world CVE is found — see tools/classification.py's
+risk_assessor_tool. Gracefully skipped (no escalation) if Neo4j/Voyage AI
+aren't configured.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from ..anonymize import Anonymizer
 from ..config import get_client, get_model_name, get_temperature
 from ..state import AgentState
 from ..tools.classification import context_enricher_tool, risk_assessor_tool
+from ..tools.graphrag import cve_graph_retrieval_tool
 
 _SYSTEM_PROMPT = (
     "You are a security threat classification specialist. You are given a list "
@@ -34,9 +37,11 @@ def classify_node(state: AgentState) -> AgentState:
 
     findings = []
     for item in anomalies:
-        risk = risk_assessor_tool(item, item.get("threat_intel"))
         context = context_enricher_tool(item)
-        findings.append({**item, **risk, **context})
+        query_text = f"{item.get('pattern') or item.get('anomaly')}: {context['description']}"
+        graph_context = cve_graph_retrieval_tool(query_text)
+        risk = risk_assessor_tool(item, item.get("threat_intel"), graph_context)
+        findings.append({**item, **risk, **context, "graph_context": graph_context})
 
     trail = list(state.get("reasoning_trail", []))
     client = get_client()

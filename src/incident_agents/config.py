@@ -50,6 +50,36 @@ def get_client() -> genai.Client | None:
     return genai.Client(api_key=key)
 
 
+def get_voyage_key() -> str | None:
+    return os.environ.get("VOYAGE_API_KEY")
+
+
+def get_neo4j_config() -> tuple[str, str, str] | None:
+    """Returns (uri, username, password), or None if any piece is missing."""
+    uri = os.environ.get("NEO4J_URI")
+    username = os.environ.get("NEO4J_USERNAME")
+    password = os.environ.get("NEO4J_PASSWORD")
+    if not (uri and username and password):
+        return None
+    return uri, username, password
+
+
+def get_neo4j_driver():
+    """Returns a connected neo4j Driver, or None if not configured.
+
+    GraphRAG retrieval falls back to skipping CVE/CWE/ATT&CK enrichment
+    (Classify proceeds on rule-based severity alone) when this returns None —
+    same graceful-degradation pattern as every other external service here.
+    """
+    from neo4j import GraphDatabase
+
+    config = get_neo4j_config()
+    if not config:
+        return None
+    uri, username, password = config
+    return GraphDatabase.driver(uri, auth=(username, password))
+
+
 @dataclass(frozen=True)
 class Thresholds:
     brute_force_min_attempts: int = 5

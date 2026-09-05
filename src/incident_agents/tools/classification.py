@@ -18,7 +18,15 @@ _DESCRIPTIONS = {
     "foreign_login": "A successful login originated from an unexpected country.",
 }
 
-def risk_assessor_tool(item: dict[str, Any], threat_intel: dict[str, Any] | None = None) -> dict[str, Any]:
+GRAPH_ESCALATION_MIN_CVSS = 7.0
+GRAPH_ESCALATION_MIN_SIMILARITY = 0.5
+
+
+def risk_assessor_tool(
+    item: dict[str, Any],
+    threat_intel: dict[str, Any] | None = None,
+    graph_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Tool: assign a severity (High/Medium/Low) to a detected pattern/anomaly.
 
     Note (found via live testing 2026-09-05, see PROJECT_DOCUMENTATION.md):
@@ -28,6 +36,13 @@ def risk_assessor_tool(item: dict[str, Any], threat_intel: dict[str, Any] | None
     maintenance — exactly the alert-fatigue problem Aegis exists to prevent.
     Severity now requires actual risk signal (threat-intel score, or a
     pattern intrinsically tied to an external actor), not just event type.
+
+    graph_context (Phase 3, GraphRAG — PROJECT_DOCUMENTATION.md §5.10) can
+    escalate severity by one level (never downgrade) when a similar, high-
+    CVSS real-world CVE is retrieved — this is the mechanism that makes
+    GraphRAG actually change decisions rather than just decorate the report.
+    Thresholds (CVSS >= 7.0, similarity >= 0.5) are a starting point pending
+    live tuning once Neo4j/Voyage AI credentials are available.
     """
     kind = item.get("pattern") or item.get("anomaly")
     confidence = float(item.get("confidence", 0.5))
@@ -49,6 +64,16 @@ def risk_assessor_tool(item: dict[str, Any], threat_intel: dict[str, Any] | None
         severity = "Medium"
     else:
         severity = "Low"
+
+    if graph_context and graph_context.get("available") and graph_context.get("matches"):
+        best_match = max(graph_context["matches"], key=lambda m: m.get("similarity_score") or 0)
+        cvss = best_match.get("cvss_score") or 0
+        similarity = best_match.get("similarity_score") or 0
+        if cvss >= GRAPH_ESCALATION_MIN_CVSS and similarity >= GRAPH_ESCALATION_MIN_SIMILARITY:
+            if severity == "Low":
+                severity = "Medium"
+            elif severity == "Medium":
+                severity = "High"
 
     return {"severity": severity, "risk_score": risk_score, "confidence": confidence}
 

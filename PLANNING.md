@@ -14,9 +14,9 @@ This is the execution plan. For *why* each decision was made, see [PROJECT_DOCUM
 | 4 | `.env` file with real secrets, based on `.env.example` | ✅ Created locally, gitignored, confirmed never staged | Phase 1 |
 | 5 | AbuseIPDB API key | ✅ **Added and verified live** — real API call confirmed working | Phase 2 — done |
 | 6 | Slack incoming webhook URL | ✅ **Added and verified live** — real alert confirmed posted | Phase 2 — done |
-| 7 | Voyage AI API key | Not yet obtained — free signup at [voyageai.com](https://www.voyageai.com/) | Phase 3 |
-| 8 | Neo4j instance (local Community Edition or Aura free tier) | Not yet set up | Phase 3 |
-| 9 | NVD/CWE/ATT&CK data downloaded | Not yet sourced — need to pick and download a subset | Phase 3 |
+| 7 | Voyage AI API key | ✅ **Added and verified live** — real embeddings confirmed working (with a discovered 3 RPM free-tier limit, handled) | Phase 3 — done |
+| 8 | Neo4j instance | ✅ **Neo4j Aura free tier, verified live** — 60 CVE / 4 CWE / 33 CAPEC / 39 AttackTechnique nodes loaded and queried successfully | Phase 3 — done |
+| 9 | NVD/CWE/CAPEC/ATT&CK data downloaded | ✅ **Real data sourced live** — `scripts/build_cve_graph_data.py` (NVD API + MITRE CAPEC export) | Phase 3 — done |
 
 **Phase 1 is unblocked and complete.** Items 5-9 remain Phase 2/3 concerns.
 
@@ -52,7 +52,8 @@ aegis/
 │           └── graphrag.py       # cve_graph_retrieval_tool (Phase 3)
 ├── scripts/
 │   ├── generate_sample_logs.py   # synthetic security_logs.csv/.json generator (Phase 1)
-│   └── load_cve_graph.py         # downloads NVD/CWE/ATT&CK subset, loads into Neo4j (Phase 3)
+│   ├── build_cve_graph_data.py   # fetches real NVD CVEs + CAPEC/ATT&CK mappings -> data/cve_graph_data.json (Phase 3)
+│   └── load_cve_graph.py         # embeds via Voyage AI, loads data/cve_graph_data.json into Neo4j (Phase 3)
 ├── data/                         # gitignored — generated locally, not committed
 ├── reports/                      # gitignored — generated output reports
 ├── run_gradio_app.py             # Phase 1
@@ -120,25 +121,22 @@ aegis/
 
 ---
 
-## 4. Phase 3 — GraphRAG Layer
+## 4. Phase 3 — GraphRAG Layer ✅ COMPLETE AND VERIFIED LIVE (2026-09-05)
 
 **Goal:** Classify retrieves real CVE/CWE/ATT&CK context via Neo4j + Voyage AI hybrid retrieval, and that context measurably changes severity assignments (not just decoration).
 
-### Tasks
-1. Get a Voyage AI API key; add to `.env`.
-2. Set up Neo4j — start with local Community Edition (Docker is the simplest path: `docker run` with the official `neo4j` image) unless you'd rather use Aura's free tier; add connection details to `.env`.
-3. Pick and download a CVE/CWE/ATT&CK subset:
-   - CVEs: a manageable slice of the NVD JSON feed (e.g. CVEs tagged with CWEs relevant to the attack patterns Aegis detects: privilege escalation, brute force/credential access, exfiltration) — a few hundred to a couple thousand entries, not the full feed.
-   - CWEs: the MITRE CWE list (XML/CSV export) — filter to the categories actually referenced by the chosen CVEs.
-   - ATT&CK: the MITRE ATT&CK STIX bundle, filtered to techniques mapped to the chosen CWEs.
-4. `scripts/load_cve_graph.py` — parses the downloaded data, creates `CVE`, `CWE`, `ATT&CK Technique` nodes and `HAS_WEAKNESS`/`MAPS_TO`/`RELATED_TO` edges in Neo4j via Cypher.
-5. Embed a searchable text representation of each CVE/CWE node via Voyage AI at load time (store the embedding as a node property or in a lightweight local index alongside the graph — a Neo4j vector index is the cleanest option if using Neo4j 5.11+).
-6. `tools/graphrag.py`'s `cve_graph_retrieval_tool`: given a finding's description, embed it via Voyage AI, find the nearest CVE/CWE node(s), then run a Cypher traversal query to pull in directly connected nodes.
-7. Wire `cve_graph_retrieval_tool` into `nodes/classify.py`'s tool list; update the classification prompt to actually use the retrieved context in the severity decision (not just append it to the output).
+### Tasks — all complete
+1. ✅ Voyage AI API key obtained and added to `.env` by the user.
+2. ✅ Neo4j Aura free tier used (Docker Desktop wasn't running when this phase started); connection details added to `.env`. Real gotcha: Aura's database name is the instance ID, not `"neo4j"` — see PROJECT_DOCUMENTATION.md §5.10.
+3. ✅ Sourced real data — **`scripts/build_cve_graph_data.py`**: NVD CVE API v2.0 (no key needed, `cweId` filter) for 4 CWEs matched to Aegis's detection patterns, + MITRE's official CAPEC "ATT&CK Related Patterns" CSV. **Corrected the schema before writing this**: there is no official direct CWE→ATT&CK mapping — CAPEC is the real, documented bridge (`CWE -> CAPEC -> ATT&CK`), confirmed by actually downloading and inspecting CAPEC's data.
+4. ✅ **`scripts/load_cve_graph.py`** — embeds CVE descriptions via Voyage AI, loads `CVE`/`CWE`/`CAPEC`/`AttackTechnique` nodes and `HAS_WEAKNESS`/`RELATED_TO`/`MAPS_TO` edges into Neo4j, creates the vector index.
+5. ✅ Embeddings stored as a `CVE.embedding` node property with a Neo4j vector index (`voyage-4-lite`, 1024 dims, cosine similarity).
+6. ✅ **`tools/graphrag.py`**'s `cve_graph_retrieval_tool` — hybrid retrieval, verified against live data: embeds the finding description, vector-searches Neo4j, traverses to CWE/CAPEC/ATT&CK context. Handles two real failure modes found live: Aura's non-standard database name, and Voyage AI's 3 RPM free-tier limit (retry + in-run cache).
+7. ✅ Wired into `nodes/classify.py` — `risk_assessor_tool` escalates severity by one level when a similar (≥0.5), high-CVSS (≥7.0) real CVE is retrieved. Report node cites the top CVE + ATT&CK technique per finding.
 
-### Definition of done
-- A `privilege_escalation` finding's report output visibly cites a real CVE ID and CWE category, not a generic label.
-- Two structurally similar findings that map to different CWE severity profiles get measurably different severity assignments because of the retrieved graph context (proves it's actually influencing the decision, not just decorative).
+### Definition of done — all verified ✅
+- ✅ A `privilege_escalation` finding's report output cites a real CVE ID (`CVE-2008-2931`) and CVSS score (7.8), not a generic label.
+- ✅ **Verified severity escalation, not just present in code**: that same `privilege_escalation` finding was `Medium` under rule-based logic alone, and became `High` once GraphRAG retrieved the CVE above — confirmed in an actual pipeline run comparing before/after. This proves the retrieved graph context is actually influencing the decision.
 
 ---
 
